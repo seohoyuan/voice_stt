@@ -4,10 +4,14 @@ import struct
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 
 class AndroidRecorderError(RuntimeError):
     pass
+
+
+EventLogger = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -23,8 +27,13 @@ class AndroidWavRecorder:
     python-for-android/Kivy APK where PyJNIus and Android classes exist.
     """
 
-    def __init__(self, config: AndroidRecordingConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AndroidRecordingConfig | None = None,
+        event_logger: EventLogger | None = None,
+    ) -> None:
         self.config = config or AndroidRecordingConfig()
+        self._event_logger = event_logger
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._output_path: Path | None = None
@@ -39,7 +48,16 @@ class AndroidWavRecorder:
     def output_path(self) -> Path | None:
         return self._output_path
 
+    @property
+    def bytes_written(self) -> int:
+        return self._bytes_written
+
+    @property
+    def error_message(self) -> str | None:
+        return str(self._error) if self._error is not None else None
+
     def start(self, output_path: Path) -> None:
+        self._log(f"recorder.start requested path={output_path}")
         if self.is_recording:
             raise AndroidRecorderError("이미 녹음 중입니다.")
 
@@ -53,11 +71,14 @@ class AndroidWavRecorder:
         self._error = None
         self._stop_event.clear()
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        self._log("recorder.start prepared output directory")
 
         self._thread = threading.Thread(target=self._record_loop, daemon=True)
         self._thread.start()
+        self._log("recorder thread started")
 
     def stop(self) -> Path:
+        self._log("recorder.stop requested")
         if self._thread is None:
             raise AndroidRecorderError("녹음이 시작되지 않았습니다.")
 
@@ -70,13 +91,16 @@ class AndroidWavRecorder:
         if self._output_path is None:
             raise AndroidRecorderError("녹음 파일 경로가 없습니다.")
 
+        self._log(f"recorder.stop completed path={self._output_path} bytes={self._bytes_written}")
         return self._output_path
 
     def _record_loop(self) -> None:
         try:
+            self._log("record loop entered")
             self._record_loop_android()
         except Exception as exc:  # pragma: no cover - exercised on Android device.
             self._error = exc
+            self._log(f"record loop error: {exc}")
 
     def _record_loop_android(self) -> None:
         if self._output_path is None:
@@ -89,6 +113,7 @@ class AndroidWavRecorder:
                 "Android 녹음은 APK 내부에서만 동작합니다. "
                 "Kivy/python-for-android 환경에서 실행해주세요."
             ) from exc
+        self._log("PyJNIus Android classes import ready")
 
         AudioFormat = autoclass("android.media.AudioFormat")
         AudioRecord = autoclass("android.media.AudioRecord")
@@ -103,6 +128,7 @@ class AndroidWavRecorder:
         )
         if min_buffer_bytes <= 0:
             raise AndroidRecorderError("Android AudioRecord buffer 크기를 얻지 못했습니다.")
+        self._log(f"AudioRecord min_buffer_bytes={min_buffer_bytes}")
 
         buffer_shorts = max(1024, min_buffer_bytes // 2)
         audio_record = AudioRecord(
@@ -118,6 +144,9 @@ class AndroidWavRecorder:
         with self._output_path.open("wb") as wav_file:
             wav_file.write(_wav_header_placeholder())
             audio_record.startRecording()
+            self._log("AudioRecord.startRecording called")
+            chunks_read = 0
+            last_report_bytes = 0
             try:
                 while not self._stop_event.is_set():
                     read_count = audio_record.read(short_buffer, 0, buffer_shorts)
@@ -125,6 +154,15 @@ class AndroidWavRecorder:
                         chunk = struct.pack("<" + "h" * read_count, *short_buffer[:read_count])
                         wav_file.write(chunk)
                         self._bytes_written += len(chunk)
+                        chunks_read += 1
+                        if chunks_read == 1 or self._bytes_written - last_report_bytes >= 64 * 1024:
+                            self._log(
+                                "AudioRecord.read ok "
+                                f"chunks={chunks_read} bytes={self._bytes_written}"
+                            )
+                            last_report_bytes = self._bytes_written
+                    elif read_count < 0:
+                        raise AndroidRecorderError(f"AudioRecord.read 실패 code={read_count}")
             finally:
                 audio_record.stop()
                 audio_record.release()
@@ -134,6 +172,15 @@ class AndroidWavRecorder:
                     sample_rate=self.config.sample_rate,
                     channels=self.config.channels,
                 )
+                self._log(f"WAV header written bytes={self._bytes_written}")
+
+    def _log(self, message: str) -> None:
+        if self._event_logger is None:
+            return
+        try:
+            self._event_logger(message)
+        except Exception:
+            pass
 
 
 def request_record_audio_permission() -> None:
@@ -145,12 +192,19 @@ def request_record_audio_permission() -> None:
     request_permissions([Permission.RECORD_AUDIO])
 
 
-def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> str:
-    """Copy a WAV file to public Downloads/Voice2Spec on Android.
+def export_file_to_downloads(
+    file_path: Path,
+    mime_type: str = "application/octet-stream",
+    folder_name: str = "Voice2Spec",
+) -> str:
+    """Copy a file to public Downloads/Voice2Spec on Android.
 
     Returns a human-readable public location. This is intentionally separate
     from recording, because app-private storage is hard for users to verify.
     """
+
+    if not file_path.exists():
+        raise AndroidRecorderError(f"내보낼 파일을 찾지 못했습니다: {file_path}")
 
     try:
         from jnius import autoclass
@@ -165,10 +219,10 @@ def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> 
     activity = PythonActivity.mActivity
     resolver = activity.getContentResolver()
     values = ContentValues()
-    display_name = wav_path.name
+    display_name = file_path.name
 
     values.put(MediaStore.MediaColumns.DISPLAY_NAME, display_name)
-    values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+    values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
     values.put(
         MediaStore.MediaColumns.RELATIVE_PATH,
         Environment.DIRECTORY_DOWNLOADS + "/" + folder_name,
@@ -180,10 +234,10 @@ def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> 
 
     output_stream = resolver.openOutputStream(uri)
     if output_stream is None:
-        raise AndroidRecorderError("다운로드 WAV 출력 스트림을 열지 못했습니다.")
+        raise AndroidRecorderError("다운로드 출력 스트림을 열지 못했습니다.")
 
     try:
-        with wav_path.open("rb") as source:
+        with file_path.open("rb") as source:
             while True:
                 chunk = source.read(64 * 1024)
                 if not chunk:
@@ -194,6 +248,12 @@ def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> 
         output_stream.close()
 
     return f"Download/{folder_name}/{display_name}"
+
+
+def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> str:
+    """Copy a WAV file to public Downloads/Voice2Spec on Android."""
+
+    return export_file_to_downloads(wav_path, mime_type="audio/wav", folder_name=folder_name)
 
 
 def _wav_header_placeholder() -> bytes:
