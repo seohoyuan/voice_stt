@@ -6,7 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from voice2spec.agents import run_pipeline
-from voice2spec.android_recorder import AndroidRecorderError, AndroidWavRecorder, request_record_audio_permission
+from voice2spec.android_recorder import (
+    AndroidRecorderError,
+    AndroidWavRecorder,
+    export_wav_to_downloads,
+    request_record_audio_permission,
+)
+from voice2spec.recorder import inspect_wav
 from voice2spec.storage import save_idea
 from voice2spec.stt import SttConfig, SttError, SttNotConfiguredError, WhisperCppTranscriber
 
@@ -231,8 +237,16 @@ class Voice2SpecApp(App):
         self.root_widget.set_recording(False)
         self._remember_latest_recording(path)
         self.root_widget.set_recording_path(path)
+        recording_info = self._describe_recording(path)
+        public_location = self._export_recording_for_user(path)
         self.root_widget.set_status(f"녹음 저장: {path.name}")
-        self.root_widget.set_result(f"녹음 파일이 저장되었습니다.\n\n{path}\n\nSTT 처리 중...")
+        self.root_widget.set_result(
+            "녹음 파일이 저장되었습니다.\n\n"
+            f"{recording_info}\n\n"
+            f"앱 내부 경로:\n{path}\n\n"
+            f"확인 가능한 위치:\n{public_location}\n\n"
+            "STT 처리 중..."
+        )
         threading.Thread(target=self._generate_from_wav, args=(path,), daemon=True).start()
 
     def generate_from_text(self, text: str) -> None:
@@ -323,6 +337,24 @@ class Voice2SpecApp(App):
         marker_path = self._app_output_dir() / "latest_recording.txt"
         marker_path.parent.mkdir(parents=True, exist_ok=True)
         marker_path.write_text(str(path), encoding="utf-8")
+
+    def _describe_recording(self, path: Path) -> str:
+        try:
+            result = inspect_wav(path)
+            size_kb = path.stat().st_size / 1024
+            return (
+                f"파일 크기: {size_kb:.1f} KB\n"
+                f"길이: {result.duration_sec:.2f}초\n"
+                f"형식: {result.sample_rate}Hz mono WAV"
+            )
+        except Exception as exc:
+            return f"파일 정보 확인 실패: {exc}"
+
+    def _export_recording_for_user(self, path: Path) -> str:
+        try:
+            return export_wav_to_downloads(path)
+        except AndroidRecorderError as exc:
+            return f"공개 폴더 복사 실패: {exc}"
 
 
 if __name__ == "__main__":

@@ -145,6 +145,57 @@ def request_record_audio_permission() -> None:
     request_permissions([Permission.RECORD_AUDIO])
 
 
+def export_wav_to_downloads(wav_path: Path, folder_name: str = "Voice2Spec") -> str:
+    """Copy a WAV file to public Downloads/Voice2Spec on Android.
+
+    Returns a human-readable public location. This is intentionally separate
+    from recording, because app-private storage is hard for users to verify.
+    """
+
+    try:
+        from jnius import autoclass
+    except ImportError as exc:
+        raise AndroidRecorderError("공개 다운로드 폴더 내보내기는 Android APK 내부에서만 가능합니다.") from exc
+
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    MediaStore = autoclass("android.provider.MediaStore")
+    ContentValues = autoclass("android.content.ContentValues")
+    Environment = autoclass("android.os.Environment")
+
+    activity = PythonActivity.mActivity
+    resolver = activity.getContentResolver()
+    values = ContentValues()
+    display_name = wav_path.name
+
+    values.put(MediaStore.MediaColumns.DISPLAY_NAME, display_name)
+    values.put(MediaStore.MediaColumns.MIME_TYPE, "audio/wav")
+    values.put(
+        MediaStore.MediaColumns.RELATIVE_PATH,
+        Environment.DIRECTORY_DOWNLOADS + "/" + folder_name,
+    )
+
+    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    if uri is None:
+        raise AndroidRecorderError("다운로드 폴더에 WAV 파일을 만들지 못했습니다.")
+
+    output_stream = resolver.openOutputStream(uri)
+    if output_stream is None:
+        raise AndroidRecorderError("다운로드 WAV 출력 스트림을 열지 못했습니다.")
+
+    try:
+        with wav_path.open("rb") as source:
+            while True:
+                chunk = source.read(64 * 1024)
+                if not chunk:
+                    break
+                output_stream.write(chunk)
+        output_stream.flush()
+    finally:
+        output_stream.close()
+
+    return f"Download/{folder_name}/{display_name}"
+
+
 def _wav_header_placeholder() -> bytes:
     return b"\x00" * 44
 

@@ -54,6 +54,14 @@ voice2spec-debug-apk
 
 이 경로는 일반 파일 앱에서 바로 보이지 않을 수 있습니다. 그래서 앱 화면의 "최근 녹음" 줄과 결과창에 마지막 WAV 경로를 표시합니다.
 
+사용자가 직접 확인할 수 있도록 녹음이 끝나면 public 다운로드 폴더에도 WAV 복사본을 만듭니다.
+
+```text
+Download/Voice2Spec/<timestamp>_<uuid>.wav
+```
+
+갤럭시 폴드4에서는 "내 파일" 앱에서 `다운로드 > Voice2Spec` 폴더를 확인합니다.
+
 ## 5. STT 파일 준비
 
 STT까지 확인하려면 APK 안에 다음 파일이 필요합니다.
