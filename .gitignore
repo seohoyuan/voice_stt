@@ -7,3 +7,7 @@ venv/
 .buildozer/
 bin/*.apk
 bin/*.aab
+bin/whisper-cli
+bin/whisper-cli.exe
+models/*.bin
+external/

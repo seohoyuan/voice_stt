@@ -1,8 +1,5 @@
 name: Build Android APK
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   workflow_dispatch:
   push:
@@ -12,6 +9,7 @@ on:
     paths:
       - "main.py"
       - "voice2spec/**"
+      - "tools/**"
       - "buildozer.spec"
       - ".github/workflows/build-apk.yml"
 
@@ -42,6 +40,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             ccache \
+            cmake \
             git \
             libffi-dev \
             libltdl-dev \
@@ -81,6 +80,9 @@ jobs:
             -o assets/fonts/NotoSansCJKkr-Regular.otf \
             https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf
           test -s assets/fonts/NotoSansCJKkr-Regular.otf
+
+      - name: Prepare whisper.cpp STT
+        run: bash tools/prepare_whisper_android.sh
 
       - name: Build APK
         run: yes | buildozer android debug

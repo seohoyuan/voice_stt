@@ -37,6 +37,8 @@ class SttTests(unittest.TestCase):
             def fake_runner(command: list[str], timeout_sec: int) -> str:
                 self.assertIn(str(model), command)
                 self.assertIn(str(wav), command)
+                self.assertIn("-t", command)
+                self.assertIn("4", command)
                 self.assertEqual(timeout_sec, 180)
                 return "[00:00:00.000 --> 00:00:01.000] 테스트 음성입니다"
 

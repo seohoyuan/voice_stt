@@ -36,7 +36,7 @@ except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "record-diagnostics-v7"
+APP_BUILD_LABEL = "stt-whisper-small-v1"
 
 
 def register_korean_font() -> str:
@@ -441,10 +441,15 @@ class Voice2SpecApp(App):
                 Path(__file__).resolve().parent / "bin" / "whisper-cli",
             ),
             model_path=self._first_existing(
+                self._app_output_dir() / "models" / "ggml-small-q5_1.bin",
                 self._app_output_dir() / "models" / "whisper-small-q5_1.bin",
+                self._app_output_dir() / "models" / "ggml-base-q5_1.bin",
+                Path(__file__).resolve().parent / "models" / "ggml-small-q5_1.bin",
                 Path(__file__).resolve().parent / "models" / "whisper-small-q5_1.bin",
+                Path(__file__).resolve().parent / "models" / "ggml-base-q5_1.bin",
             ),
             language="ko",
+            threads=4,
         )
 
     def _first_existing(self, *paths: Path) -> Path:

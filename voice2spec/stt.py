@@ -24,6 +24,7 @@ class SttConfig:
     model_path: Path | None = None
     language: str = "ko"
     timeout_sec: int = 180
+    threads: int = 4
 
     @classmethod
     def from_env(cls) -> "SttConfig":
@@ -89,6 +90,8 @@ class WhisperCppTranscriber(Transcriber):
             str(wav_path),
             "-l",
             self.config.language,
+            "-t",
+            str(self.config.threads),
             "-nt",
         ]
 
@@ -103,6 +106,11 @@ class WhisperCppTranscriber(Transcriber):
             raise SttNotConfiguredError(f"whisper.cpp 모델 파일을 찾지 못했습니다: {self.config.model_path}")
         if not self.config.binary_path.exists():
             raise SttNotConfiguredError(f"whisper.cpp 실행 파일을 찾지 못했습니다: {self.config.binary_path}")
+        try:
+            mode = self.config.binary_path.stat().st_mode
+            self.config.binary_path.chmod(mode | 0o111)
+        except OSError as exc:
+            raise SttNotConfiguredError(f"whisper.cpp 실행 권한 설정 실패: {exc}") from exc
 
 
 def clean_whisper_output(output: str) -> str:

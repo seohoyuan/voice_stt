@@ -7,6 +7,7 @@ REQUIRED_FILES = [
     "main.py",
     "buildozer.spec",
     ".github/workflows/build-apk.yml",
+    "tools/prepare_whisper_android.sh",
     "assets/fonts/.gitkeep",
     "voice2spec/android_recorder.py",
     "voice2spec/stt.py",
@@ -39,6 +40,19 @@ def main() -> None:
     if missing_snippets:
         print("Missing required buildozer.spec settings:")
         for snippet in missing_snippets:
+            print(f"- {snippet}")
+        raise SystemExit(1)
+
+    workflow = (root / ".github/workflows/build-apk.yml").read_text(encoding="utf-8")
+    workflow_snippets = [
+        "Prepare whisper.cpp STT",
+        "bash tools/prepare_whisper_android.sh",
+    ]
+    missing_workflow_snippets = [snippet for snippet in workflow_snippets if snippet not in workflow]
+
+    if missing_workflow_snippets:
+        print("Missing required GitHub Actions STT steps:")
+        for snippet in missing_workflow_snippets:
             print(f"- {snippet}")
         raise SystemExit(1)
 
