@@ -71,6 +71,14 @@ jobs:
           python tools/check_mobile_project.py
           python -m unittest discover -s tests
 
+      - name: Prepare Korean font
+        run: |
+          mkdir -p assets/fonts
+          curl -L --retry 3 \
+            -o assets/fonts/NotoSansCJKkr-Regular.otf \
+            https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf
+          test -s assets/fonts/NotoSansCJKkr-Regular.otf
+
       - name: Build APK
         run: yes | buildozer android debug
 

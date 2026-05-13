@@ -18,3 +18,4 @@
 - D14: STT는 `WhisperCppTranscriber` 어댑터로 연결한다. 앱 코드는 `bin/whisper-cli`와 `models/whisper-small-q5_1.bin`을 찾고, 파일이 없으면 녹음 파일은 보존한 채 STT 설정 필요 메시지를 보여준다.
 - D15: 로컬 설치 부담을 줄이기 위해 APK 빌드는 GitHub Actions + Buildozer로 먼저 시도한다. `.github/workflows/build-apk.yml`은 debug APK를 만들고 artifact로 업로드한다.
 - D16: 첫 GitHub Actions APK 빌드는 Android SDK 라이선스 미수락으로 `build-tools;37.0.0` 설치가 스킵되어 `Aidl not found`로 실패했다. `android.accept_sdk_license = True`와 `yes | buildozer android debug`로 자동 수락을 명시한다.
+- D17: Galaxy Fold4 첫 실행 화면에서 한글이 네모로 깨졌고 기본 Kivy 레이아웃이 앱처럼 보이지 않았다. APK 빌드 시 Noto Sans CJK KR 폰트를 받아 포함하고, Kivy UI를 모바일용 색상/간격/버튼 레이아웃으로 재작성한다.

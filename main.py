@@ -14,44 +14,148 @@ from voice2spec.stt import SttConfig, SttError, SttNotConfiguredError, WhisperCp
 try:
     from kivy.app import App
     from kivy.clock import Clock
+    from kivy.core.text import LabelBase
+    from kivy.core.window import Window
+    from kivy.graphics import Color, Rectangle
+    from kivy.metrics import dp, sp
     from kivy.uix.boxlayout import BoxLayout
     from kivy.uix.button import Button
     from kivy.uix.label import Label
     from kivy.uix.textinput import TextInput
 except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
-    raise SystemExit("Kivy가 필요합니다. APK 빌드에서는 buildozer.spec의 requirements로 설치됩니다.") from exc
+    raise SystemExit("Kivy is required for the mobile APK build.") from exc
+
+
+FONT_NAME = "Roboto"
+
+
+def register_korean_font() -> str:
+    candidates = [
+        Path(__file__).resolve().parent / "assets" / "fonts" / "NotoSansCJKkr-Regular.otf",
+        Path("/system/fonts/NotoSansCJK-Regular.ttc"),
+        Path("/system/fonts/NotoSansCJKkr-Regular.otf"),
+        Path("/system/fonts/SamsungOneKorean-400.ttf"),
+        Path("/system/fonts/DroidSansFallback.ttf"),
+    ]
+    for font_path in candidates:
+        if font_path.exists():
+            LabelBase.register(name="Voice2SpecKR", fn_regular=str(font_path))
+            return "Voice2SpecKR"
+    return "Roboto"
+
+
+class Panel(BoxLayout):
+    def __init__(self, background=(1, 1, 1, 1), **kwargs) -> None:
+        super().__init__(**kwargs)
+        with self.canvas.before:
+            Color(*background)
+            self._rect = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._sync_rect, size=self._sync_rect)
+
+    def _sync_rect(self, *_args) -> None:
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+
+
+class AppButton(Button):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(
+            font_name=FONT_NAME,
+            font_size=sp(16),
+            size_hint_y=None,
+            height=dp(52),
+            background_normal="",
+            background_down="",
+            color=(1, 1, 1, 1),
+            **kwargs,
+        )
 
 
 class Voice2SpecRoot(BoxLayout):
     def __init__(self, app: "Voice2SpecApp", **kwargs) -> None:
-        super().__init__(orientation="vertical", spacing=12, padding=16, **kwargs)
+        super().__init__(orientation="vertical", spacing=dp(12), padding=dp(16), **kwargs)
         self.app = app
 
-        self.status = Label(text="Voice2Spec", size_hint_y=None, height=48)
-        self.input = TextInput(
-            hint_text="아이디어를 입력하거나 녹음하세요",
-            multiline=True,
-            size_hint_y=1,
+        with self.canvas.before:
+            Color(0.07, 0.09, 0.10, 1)
+            self._background = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._sync_background, size=self._sync_background)
+
+        self.title = Label(
+            text="Voice2Spec",
+            font_name=FONT_NAME,
+            font_size=sp(24),
+            bold=True,
+            color=(1, 1, 1, 1),
+            size_hint_y=None,
+            height=dp(42),
         )
-        self.record_button = Button(text="녹음 시작", size_hint_y=None, height=56)
-        self.stop_button = Button(text="녹음 중지", size_hint_y=None, height=56, disabled=True)
-        self.generate_button = Button(text="텍스트로 명세 생성", size_hint_y=None, height=56)
-        self.result = TextInput(readonly=True, multiline=True, size_hint_y=1)
+        self.status = Label(
+            text="아이디어를 입력하거나 녹음하세요.",
+            font_name=FONT_NAME,
+            font_size=sp(14),
+            color=(0.78, 0.86, 0.88, 1),
+            size_hint_y=None,
+            height=dp(32),
+        )
+        self.input = TextInput(
+            hint_text="예: 회의 내용을 입력하면 결정사항과 할 일을 정리하는 앱",
+            font_name=FONT_NAME,
+            font_size=sp(16),
+            multiline=True,
+            size_hint_y=0.32,
+            padding=(dp(12), dp(12), dp(12), dp(12)),
+            background_color=(0.97, 0.98, 0.98, 1),
+            foreground_color=(0.05, 0.07, 0.08, 1),
+            cursor_color=(0.00, 0.42, 0.40, 1),
+        )
+
+        button_panel = Panel(
+            orientation="vertical",
+            spacing=dp(8),
+            padding=0,
+            size_hint_y=None,
+            height=dp(164),
+            background=(0.07, 0.09, 0.10, 1),
+        )
+        self.record_button = AppButton(text="녹음 시작", background_color=(0.00, 0.42, 0.40, 1))
+        self.stop_button = AppButton(text="녹음 중지", background_color=(0.58, 0.20, 0.18, 1), disabled=True)
+        self.generate_button = AppButton(text="텍스트로 명세 생성", background_color=(0.22, 0.38, 0.56, 1))
+        button_panel.add_widget(self.record_button)
+        button_panel.add_widget(self.stop_button)
+        button_panel.add_widget(self.generate_button)
+
+        self.result = TextInput(
+            text="결과가 여기에 표시됩니다.",
+            readonly=True,
+            multiline=True,
+            font_name=FONT_NAME,
+            font_size=sp(15),
+            size_hint_y=0.68,
+            padding=(dp(12), dp(12), dp(12), dp(12)),
+            background_color=(0.97, 0.98, 0.98, 1),
+            foreground_color=(0.05, 0.07, 0.08, 1),
+        )
 
         self.record_button.bind(on_press=lambda _: app.start_recording())
         self.stop_button.bind(on_press=lambda _: app.stop_recording())
         self.generate_button.bind(on_press=lambda _: app.generate_from_text(self.input.text))
 
+        self.add_widget(self.title)
         self.add_widget(self.status)
         self.add_widget(self.input)
-        self.add_widget(self.record_button)
-        self.add_widget(self.stop_button)
-        self.add_widget(self.generate_button)
+        self.add_widget(button_panel)
         self.add_widget(self.result)
+
+    def _sync_background(self, *_args) -> None:
+        self._background.pos = self.pos
+        self._background.size = self.size
 
     def set_recording(self, recording: bool) -> None:
         self.record_button.disabled = recording
         self.stop_button.disabled = not recording
+        self.record_button.opacity = 0.45 if recording else 1
+        self.stop_button.opacity = 1 if recording else 0.45
 
     def set_status(self, text: str) -> None:
         self.status.text = text
@@ -67,6 +171,10 @@ class Voice2SpecApp(App):
         self.recorder = AndroidWavRecorder()
 
     def build(self):
+        global FONT_NAME
+        FONT_NAME = register_korean_font()
+        Window.clearcolor = (0.07, 0.09, 0.10, 1)
+
         try:
             request_record_audio_permission()
         except AndroidRecorderError:
@@ -87,7 +195,7 @@ class Voice2SpecApp(App):
             return
 
         self.root_widget.set_recording(True)
-        self.root_widget.set_status("녹음 중...")
+        self.root_widget.set_status("녹음 중입니다. 말을 마치면 중지를 누르세요.")
 
     def stop_recording(self) -> None:
         if self.root_widget is None:
@@ -102,7 +210,7 @@ class Voice2SpecApp(App):
 
         self.root_widget.set_recording(False)
         self.root_widget.set_status(f"녹음 저장: {path.name}")
-        self.root_widget.set_result(f"녹음 파일이 저장되었습니다.\n{path}\n\nSTT 처리 중...")
+        self.root_widget.set_result(f"녹음 파일이 저장되었습니다.\n\n{path}\n\nSTT 처리 중...")
         threading.Thread(target=self._generate_from_wav, args=(path,), daemon=True).start()
 
     def generate_from_text(self, text: str) -> None:
@@ -115,12 +223,7 @@ class Voice2SpecApp(App):
         transcript, idea, spec, validation = run_pipeline(text)
         markdown_path, _ = save_idea(self._ideas_dir(), transcript, idea, spec, validation)
         self.root_widget.set_status(f"저장 완료: {markdown_path.name}")
-        self.root_widget.set_result(
-            f"# {spec.title}\n\n"
-            f"{spec.summary}\n\n"
-            "## 화면\n"
-            + "\n\n".join(f"{screen.name}\n{screen.wireframe}" for screen in spec.screens)
-        )
+        self.root_widget.set_result(self._format_spec_result(spec.title, spec.summary, spec.screens))
 
     def _generate_from_wav(self, wav_path: Path) -> None:
         try:
@@ -131,29 +234,27 @@ class Voice2SpecApp(App):
             self._schedule_result(
                 status="STT 설정 필요",
                 text=(
-                    f"녹음 파일은 저장되었습니다.\n{wav_path}\n\n"
+                    f"녹음 파일은 저장되었습니다.\n\n{wav_path}\n\n"
                     f"{exc}\n\n"
-                    "모델 파일과 whisper.cpp 실행 파일을 앱에 넣으면 이 단계가 실제 음성 인식으로 바뀝니다."
+                    "whisper.cpp Android 파일과 모델을 넣으면 이 녹음이 텍스트로 변환됩니다."
                 ),
             )
             return
         except SttError as exc:
             self._schedule_result(
                 status="STT 실패",
-                text=f"녹음 파일은 저장되었습니다.\n{wav_path}\n\nSTT 실패: {exc}",
+                text=f"녹음 파일은 저장되었습니다.\n\n{wav_path}\n\nSTT 실패: {exc}",
             )
             return
 
         self._schedule_result(
             status=f"저장 완료: {markdown_path.name}",
-            text=(
-                f"STT 결과:\n{transcript.text}\n\n"
-                f"# {spec.title}\n\n"
-                f"{spec.summary}\n\n"
-                "## 화면\n"
-                + "\n\n".join(f"{screen.name}\n{screen.wireframe}" for screen in spec.screens)
-            ),
+            text=f"STT 결과:\n{transcript.text}\n\n{self._format_spec_result(spec.title, spec.summary, spec.screens)}",
         )
+
+    def _format_spec_result(self, title: str, summary: str, screens) -> str:
+        screen_text = "\n\n".join(f"[{screen.name}]\n{screen.wireframe}" for screen in screens)
+        return f"# {title}\n\n{summary}\n\n## 화면\n{screen_text}"
 
     def _schedule_result(self, status: str, text: str) -> None:
         def update_ui(_dt) -> None:

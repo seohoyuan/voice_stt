@@ -4,8 +4,8 @@ package.name = voice2spec
 package.domain = org.voice2spec
 
 source.dir = .
-source.include_exts = py,txt,md,json,bin
-source.include_patterns = bin/*,models/*
+source.include_exts = py,txt,md,json,bin,otf,ttf,ttc
+source.include_patterns = assets/fonts/*,bin/*,models/*
 
 version = 0.1.0
 requirements = python3,kivy,pyjnius

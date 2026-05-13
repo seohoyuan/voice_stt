@@ -7,6 +7,7 @@ REQUIRED_FILES = [
     "main.py",
     "buildozer.spec",
     ".github/workflows/build-apk.yml",
+    "assets/fonts/.gitkeep",
     "voice2spec/android_recorder.py",
     "voice2spec/stt.py",
     "voice2spec/agents.py",

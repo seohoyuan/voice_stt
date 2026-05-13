@@ -11,6 +11,7 @@ Voice2Spec는 모바일에서 아이디어를 입력하거나 녹음하고, 이�
 
 - 모바일 녹음: Android `AudioRecord` 기반 16kHz mono WAV 저장 구현
 - STT 연결점: whisper.cpp CLI 어댑터 구현
+- 모바일 한글 UI: Noto Sans CJK KR 폰트를 APK 빌드 시 포함
 - 텍스트 입력 → 명세 생성: 구현
 - Markdown/JSON 저장: 구현
 - STT 음성 → 텍스트 변환: 어댑터 구현, 실제 바이너리/모델 필요
@@ -78,6 +79,7 @@ GitHub Actions 자동 빌드 설정은 이미 들어 있습니다.
 ```text
 main.py                         # Kivy 모바일 앱 진입점
 buildozer.spec                  # APK 빌드 설정
+assets/fonts/                   # APK 빌드 시 한글 폰트 포함
 voice2spec/
   android_recorder.py           # Android AudioRecord 기반 WAV 녹음
   agents.py                     # Transcriber, Refiner, Specifier, Validator
