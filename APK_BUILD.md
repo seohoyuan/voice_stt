@@ -39,6 +39,21 @@ voice2spec-debug-apk
 -> WAV 파일 저장 경로가 화면에 표시됨
 ```
 
+저장 위치는 앱 내부 저장소입니다.
+
+```text
+<user_data_dir>/output/recordings/<timestamp>_<uuid>.wav
+<user_data_dir>/output/latest_recording.txt
+```
+
+갤럭시 폴드4에서는 대체로 아래와 같은 private 경로입니다.
+
+```text
+/data/user/0/org.voice2spec.voice2spec/files/app/output/recordings/
+```
+
+이 경로는 일반 파일 앱에서 바로 보이지 않을 수 있습니다. 그래서 앱 화면의 "최근 녹음" 줄과 결과창에 마지막 WAV 경로를 표시합니다.
+
 ## 5. STT 파일 준비
 
 STT까지 확인하려면 APK 안에 다음 파일이 필요합니다.

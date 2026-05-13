@@ -74,6 +74,21 @@ GitHub Actions 자동 빌드 설정은 이미 들어 있습니다.
 
 사용 방법은 `APK_BUILD.md`를 확인합니다.
 
+녹음 파일은 앱 내부 저장소의 Kivy `user_data_dir` 아래에 저장됩니다.
+
+```text
+<user_data_dir>/output/recordings/<timestamp>_<uuid>.wav
+<user_data_dir>/output/latest_recording.txt
+```
+
+갤럭시 폴드4에서는 대체로 아래와 같은 private 경로입니다.
+
+```text
+/data/user/0/org.voice2spec.voice2spec/files/app/output/recordings/
+```
+
+일반 파일 앱에서는 이 경로가 바로 보이지 않을 수 있습니다. 앱 화면의 "최근 녹음" 줄과 결과창에서 마지막 WAV 경로를 확인합니다.
+
 ## 구조
 
 ```text

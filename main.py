@@ -98,6 +98,19 @@ class Voice2SpecRoot(BoxLayout):
             size_hint_y=None,
             height=dp(32),
         )
+        self.path_label = Label(
+            text="최근 녹음: 아직 없음",
+            font_name=FONT_NAME,
+            font_size=sp(12),
+            color=(0.68, 0.78, 0.80, 1),
+            halign="left",
+            valign="middle",
+            size_hint_y=None,
+            height=dp(46),
+        )
+        self.path_label.bind(
+            width=lambda instance, value: setattr(instance, "text_size", (value, None)),
+        )
         self.input = TextInput(
             hint_text="예: 회의 내용을 입력하면 결정사항과 할 일을 정리하는 앱",
             font_name=FONT_NAME,
@@ -143,6 +156,7 @@ class Voice2SpecRoot(BoxLayout):
 
         self.add_widget(self.title)
         self.add_widget(self.status)
+        self.add_widget(self.path_label)
         self.add_widget(self.input)
         self.add_widget(button_panel)
         self.add_widget(self.result)
@@ -162,6 +176,12 @@ class Voice2SpecRoot(BoxLayout):
 
     def set_result(self, text: str) -> None:
         self.result.text = text
+
+    def set_recording_path(self, path: Path | None) -> None:
+        if path is None:
+            self.path_label.text = "최근 녹음: 아직 없음"
+        else:
+            self.path_label.text = f"최근 녹음: {path}"
 
 
 class Voice2SpecApp(App):
@@ -209,6 +229,8 @@ class Voice2SpecApp(App):
             return
 
         self.root_widget.set_recording(False)
+        self._remember_latest_recording(path)
+        self.root_widget.set_recording_path(path)
         self.root_widget.set_status(f"녹음 저장: {path.name}")
         self.root_widget.set_result(f"녹음 파일이 저장되었습니다.\n\n{path}\n\nSTT 처리 중...")
         threading.Thread(target=self._generate_from_wav, args=(path,), daemon=True).start()
@@ -296,6 +318,11 @@ class Voice2SpecApp(App):
         path = self._app_output_dir() / "recordings"
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+    def _remember_latest_recording(self, path: Path) -> None:
+        marker_path = self._app_output_dir() / "latest_recording.txt"
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        marker_path.write_text(str(path), encoding="utf-8")
 
 
 if __name__ == "__main__":

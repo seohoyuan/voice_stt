@@ -19,3 +19,4 @@
 - D15: 로컬 설치 부담을 줄이기 위해 APK 빌드는 GitHub Actions + Buildozer로 먼저 시도한다. `.github/workflows/build-apk.yml`은 debug APK를 만들고 artifact로 업로드한다.
 - D16: 첫 GitHub Actions APK 빌드는 Android SDK 라이선스 미수락으로 `build-tools;37.0.0` 설치가 스킵되어 `Aidl not found`로 실패했다. `android.accept_sdk_license = True`와 `yes | buildozer android debug`로 자동 수락을 명시한다.
 - D17: Galaxy Fold4 첫 실행 화면에서 한글이 네모로 깨졌고 기본 Kivy 레이아웃이 앱처럼 보이지 않았다. APK 빌드 시 Noto Sans CJK KR 폰트를 받아 포함하고, Kivy UI를 모바일용 색상/간격/버튼 레이아웃으로 재작성한다.
+- D18: 녹음 파일은 Kivy `user_data_dir/output/recordings/` 아래 앱 내부 저장소에 저장한다. 일반 파일 앱에서 보이지 않을 수 있으므로, 화면에 "최근 녹음" 경로를 상시 표시하고 `output/latest_recording.txt`에도 마지막 WAV 경로를 기록한다.
