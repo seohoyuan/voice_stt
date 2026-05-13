@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import struct
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,17 +106,19 @@ class AndroidWavRecorder:
             raise AndroidRecorderError("녹음 파일 경로가 없습니다.")
 
         try:
-            from jnius import autoclass, jarray
+            from jnius import autoclass
         except ImportError as exc:
             raise AndroidRecorderError(
-                "Android 녹음은 APK 내부에서만 동작합니다. "
-                "Kivy/python-for-android 환경에서 실행해주세요."
+                "PyJNIus autoclass를 불러오지 못했습니다. APK 빌드에 pyjnius가 포함됐는지 확인해야 합니다. "
+                f"원인: {exc}"
             ) from exc
         self._log("PyJNIus Android classes import ready")
 
         AudioFormat = autoclass("android.media.AudioFormat")
         AudioRecord = autoclass("android.media.AudioRecord")
         MediaRecorder = autoclass("android.media.MediaRecorder")
+        JavaByte = autoclass("java.lang.Byte")
+        JavaArray = autoclass("java.lang.reflect.Array")
 
         channel_config = AudioFormat.CHANNEL_IN_MONO
         audio_format = AudioFormat.ENCODING_PCM_16BIT
@@ -130,13 +131,13 @@ class AndroidWavRecorder:
             raise AndroidRecorderError("Android AudioRecord buffer 크기를 얻지 못했습니다.")
         self._log(f"AudioRecord min_buffer_bytes={min_buffer_bytes}")
 
-        buffer_shorts = max(1024, min_buffer_bytes // 2)
+        buffer_bytes = max(2048, min_buffer_bytes)
         audio_record = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             self.config.sample_rate,
             channel_config,
             audio_format,
-            min_buffer_bytes,
+            max(min_buffer_bytes, buffer_bytes),
         )
         state = audio_record.getState()
         self._log(f"AudioRecord state={state}")
@@ -147,28 +148,30 @@ class AndroidWavRecorder:
                 f"state={state}"
             )
 
-        short_buffer = jarray("h")([0] * buffer_shorts)
+        byte_buffer = JavaArray.newInstance(JavaByte.TYPE, buffer_bytes)
 
         with self._output_path.open("wb") as wav_file:
             wav_file.write(_wav_header_placeholder())
-            audio_record.startRecording()
-            recording_state = audio_record.getRecordingState()
-            self._log(f"AudioRecord.startRecording called recording_state={recording_state}")
-            if recording_state != AudioRecord.RECORDSTATE_RECORDING:
-                audio_record.release()
-                raise AndroidRecorderError(
-                    "AudioRecord 녹음 시작 실패. 마이크 권한 허용 여부와 다른 녹음 앱 실행 여부를 확인하세요. "
-                    f"recording_state={recording_state}"
-                )
+            recording_started = False
             chunks_read = 0
             last_report_bytes = 0
             try:
+                audio_record.startRecording()
+                recording_state = audio_record.getRecordingState()
+                self._log(f"AudioRecord.startRecording called recording_state={recording_state}")
+                if recording_state != AudioRecord.RECORDSTATE_RECORDING:
+                    raise AndroidRecorderError(
+                        "AudioRecord 녹음 시작 실패. 마이크 권한 허용 여부와 다른 녹음 앱 실행 여부를 확인하세요. "
+                        f"recording_state={recording_state}"
+                    )
+                recording_started = True
+
                 while not self._stop_event.is_set():
-                    read_count = audio_record.read(short_buffer, 0, buffer_shorts)
+                    read_count = audio_record.read(byte_buffer, 0, buffer_bytes)
                     if read_count > 0:
-                        chunk = struct.pack("<" + "h" * read_count, *short_buffer[:read_count])
+                        chunk = bytes(int(byte_buffer[index]) & 0xFF for index in range(read_count))
                         wav_file.write(chunk)
-                        self._bytes_written += len(chunk)
+                        self._bytes_written += read_count
                         chunks_read += 1
                         if chunks_read == 1 or self._bytes_written - last_report_bytes >= 64 * 1024:
                             self._log(
@@ -180,7 +183,7 @@ class AndroidWavRecorder:
                         raise AndroidRecorderError(f"AudioRecord.read 실패 code={read_count}")
             finally:
                 try:
-                    if audio_record.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING:
+                    if recording_started and audio_record.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING:
                         audio_record.stop()
                 finally:
                     audio_record.release()
