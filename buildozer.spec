@@ -17,6 +17,7 @@ android.permissions = RECORD_AUDIO
 android.api = 35
 android.minapi = 29
 android.archs = arm64-v8a
+android.accept_sdk_license = True
 
 [buildozer]
 log_level = 2

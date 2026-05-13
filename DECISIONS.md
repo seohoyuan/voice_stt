@@ -17,3 +17,4 @@
 - D13: 실제 목표 기기는 Galaxy Fold4 Android APK다. PC `sounddevice` 녹음은 개발용 보조 경로로만 두고, 모바일 앱 녹음은 `android.media.AudioRecord`를 PyJNIus로 호출하는 `AndroidWavRecorder`를 기준으로 한다.
 - D14: STT는 `WhisperCppTranscriber` 어댑터로 연결한다. 앱 코드는 `bin/whisper-cli`와 `models/whisper-small-q5_1.bin`을 찾고, 파일이 없으면 녹음 파일은 보존한 채 STT 설정 필요 메시지를 보여준다.
 - D15: 로컬 설치 부담을 줄이기 위해 APK 빌드는 GitHub Actions + Buildozer로 먼저 시도한다. `.github/workflows/build-apk.yml`은 debug APK를 만들고 artifact로 업로드한다.
+- D16: 첫 GitHub Actions APK 빌드는 Android SDK 라이선스 미수락으로 `build-tools;37.0.0` 설치가 스킵되어 `Aidl not found`로 실패했다. `android.accept_sdk_license = True`와 `yes | buildozer android debug`로 자동 수락을 명시한다.

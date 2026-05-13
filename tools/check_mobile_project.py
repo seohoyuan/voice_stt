@@ -31,6 +31,7 @@ def main() -> None:
         "requirements = python3,kivy,pyjnius",
         "android.permissions = RECORD_AUDIO",
         "android.archs = arm64-v8a",
+        "android.accept_sdk_license = True",
     ]
     missing_snippets = [snippet for snippet in required_snippets if snippet not in spec]
 
