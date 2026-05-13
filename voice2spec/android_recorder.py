@@ -138,13 +138,28 @@ class AndroidWavRecorder:
             audio_format,
             min_buffer_bytes,
         )
+        state = audio_record.getState()
+        self._log(f"AudioRecord state={state}")
+        if state != AudioRecord.STATE_INITIALIZED:
+            audio_record.release()
+            raise AndroidRecorderError(
+                "AudioRecord 초기화 실패. 마이크 권한이 없거나 다른 앱이 마이크를 사용 중일 수 있습니다. "
+                f"state={state}"
+            )
 
         short_buffer = jarray("h")([0] * buffer_shorts)
 
         with self._output_path.open("wb") as wav_file:
             wav_file.write(_wav_header_placeholder())
             audio_record.startRecording()
-            self._log("AudioRecord.startRecording called")
+            recording_state = audio_record.getRecordingState()
+            self._log(f"AudioRecord.startRecording called recording_state={recording_state}")
+            if recording_state != AudioRecord.RECORDSTATE_RECORDING:
+                audio_record.release()
+                raise AndroidRecorderError(
+                    "AudioRecord 녹음 시작 실패. 마이크 권한 허용 여부와 다른 녹음 앱 실행 여부를 확인하세요. "
+                    f"recording_state={recording_state}"
+                )
             chunks_read = 0
             last_report_bytes = 0
             try:
@@ -164,15 +179,18 @@ class AndroidWavRecorder:
                     elif read_count < 0:
                         raise AndroidRecorderError(f"AudioRecord.read 실패 code={read_count}")
             finally:
-                audio_record.stop()
-                audio_record.release()
-                _rewrite_wav_header(
-                    wav_file,
-                    data_size=self._bytes_written,
-                    sample_rate=self.config.sample_rate,
-                    channels=self.config.channels,
-                )
-                self._log(f"WAV header written bytes={self._bytes_written}")
+                try:
+                    if audio_record.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING:
+                        audio_record.stop()
+                finally:
+                    audio_record.release()
+                    _rewrite_wav_header(
+                        wav_file,
+                        data_size=self._bytes_written,
+                        sample_rate=self.config.sample_rate,
+                        channels=self.config.channels,
+                    )
+                    self._log(f"WAV header written bytes={self._bytes_written}")
 
     def _log(self, message: str) -> None:
         if self._event_logger is None:
@@ -190,6 +208,15 @@ def request_record_audio_permission() -> None:
         raise AndroidRecorderError("권한 요청은 Android APK 내부에서만 가능합니다.") from exc
 
     request_permissions([Permission.RECORD_AUDIO])
+
+
+def has_record_audio_permission() -> bool:
+    try:
+        from android.permissions import Permission, check_permission
+    except ImportError as exc:
+        raise AndroidRecorderError("권한 확인은 Android APK 내부에서만 가능합니다.") from exc
+
+    return bool(check_permission(Permission.RECORD_AUDIO))
 
 
 def export_file_to_downloads(
@@ -212,7 +239,8 @@ def export_file_to_downloads(
         raise AndroidRecorderError("공개 다운로드 폴더 내보내기는 Android APK 내부에서만 가능합니다.") from exc
 
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
-    MediaStore = autoclass("android.provider.MediaStore")
+    MediaColumns = autoclass("android.provider.MediaStore$MediaColumns")
+    Downloads = autoclass("android.provider.MediaStore$Downloads")
     ContentValues = autoclass("android.content.ContentValues")
     Environment = autoclass("android.os.Environment")
 
@@ -221,14 +249,14 @@ def export_file_to_downloads(
     values = ContentValues()
     display_name = file_path.name
 
-    values.put(MediaStore.MediaColumns.DISPLAY_NAME, display_name)
-    values.put(MediaStore.MediaColumns.MIME_TYPE, mime_type)
+    values.put(MediaColumns.DISPLAY_NAME, display_name)
+    values.put(MediaColumns.MIME_TYPE, mime_type)
     values.put(
-        MediaStore.MediaColumns.RELATIVE_PATH,
+        MediaColumns.RELATIVE_PATH,
         Environment.DIRECTORY_DOWNLOADS + "/" + folder_name,
     )
 
-    uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    uri = resolver.insert(Downloads.EXTERNAL_CONTENT_URI, values)
     if uri is None:
         raise AndroidRecorderError("다운로드 폴더에 WAV 파일을 만들지 못했습니다.")
 

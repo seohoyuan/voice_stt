@@ -11,6 +11,7 @@ from voice2spec.android_recorder import (
     AndroidWavRecorder,
     export_file_to_downloads,
     export_wav_to_downloads,
+    has_record_audio_permission,
     request_record_audio_permission,
 )
 from voice2spec.recorder import inspect_wav
@@ -35,7 +36,7 @@ except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "record-diagnostics-v3"
+APP_BUILD_LABEL = "record-diagnostics-v4"
 
 
 def register_korean_font() -> str:
@@ -261,6 +262,28 @@ class Voice2SpecApp(App):
         path = self._recordings_dir() / f"{datetime.now():%Y-%m-%d_%H%M%S}_{uuid4()}.wav"
         self._log_event(f"ui.start_recording tapped target={path}")
         self.root_widget.set_recording_state("녹음 상태: 시작 요청 중...")
+        try:
+            permission_granted = has_record_audio_permission()
+            self._log_event(f"record audio permission granted={permission_granted}")
+            if not permission_granted:
+                request_record_audio_permission()
+                raise AndroidRecorderError(
+                    "마이크 권한이 아직 허용되지 않았습니다. 권한 팝업에서 허용한 뒤 다시 녹음 시작을 누르세요."
+                )
+        except AndroidRecorderError as exc:
+            self._log_event(f"record audio permission check failed: {exc}")
+            log_location = self._export_log_for_user()
+            message = (
+                "녹음 시작 전 권한 확인 실패\n\n"
+                f"{exc}\n\n"
+                f"진단 로그:\n{log_location}"
+            )
+            self.root_widget.set_status("마이크 권한 필요")
+            self.root_widget.set_recording_state("녹음 상태: 권한 필요")
+            self.root_widget.set_result(message)
+            self._notify_user("마이크 권한 필요", message)
+            return
+
         try:
             self.recorder.start(path)
         except AndroidRecorderError as exc:
