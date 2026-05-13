@@ -116,7 +116,7 @@ class AndroidWavRecorder:
 
         AudioFormat = autoclass("android.media.AudioFormat")
         AudioRecord = autoclass("android.media.AudioRecord")
-        MediaRecorder = autoclass("android.media.MediaRecorder")
+        AudioSource = autoclass("android.media.MediaRecorder$AudioSource")
         JavaByte = autoclass("java.lang.Byte")
         JavaArray = autoclass("java.lang.reflect.Array")
 
@@ -132,8 +132,10 @@ class AndroidWavRecorder:
         self._log(f"AudioRecord min_buffer_bytes={min_buffer_bytes}")
 
         buffer_bytes = max(2048, min_buffer_bytes)
+        audio_source = AudioSource.MIC
+        self._log(f"AudioRecord source=MIC({audio_source}) buffer_bytes={buffer_bytes}")
         audio_record = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            audio_source,
             self.config.sample_rate,
             channel_config,
             audio_format,

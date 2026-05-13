@@ -36,7 +36,7 @@ except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "record-diagnostics-v5"
+APP_BUILD_LABEL = "record-diagnostics-v6"
 
 
 def register_korean_font() -> str:
