@@ -1,0 +1,5 @@
+# The CLI prototype itself has no required third-party packages.
+# Android APK dependencies are declared in buildozer.spec.
+#
+# Optional desktop-only microphone experiment:
+# sounddevice>=0.4.6
