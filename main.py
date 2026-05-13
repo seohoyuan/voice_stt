@@ -27,6 +27,7 @@ try:
     from kivy.uix.boxlayout import BoxLayout
     from kivy.uix.button import Button
     from kivy.uix.label import Label
+    from kivy.uix.popup import Popup
     from kivy.uix.textinput import TextInput
 except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
     raise SystemExit("Kivy is required for the mobile APK build.") from exc
@@ -237,8 +238,9 @@ class Voice2SpecApp(App):
         self.root_widget.set_recording(False)
         self._remember_latest_recording(path)
         self.root_widget.set_recording_path(path)
-        recording_info = self._describe_recording(path)
+        recording_ok, recording_info = self._describe_recording(path)
         public_location = self._export_recording_for_user(path)
+        popup_text = self._recording_popup_text(recording_ok, recording_info, path, public_location)
         self.root_widget.set_status(f"녹음 저장: {path.name}")
         self.root_widget.set_result(
             "녹음 파일이 저장되었습니다.\n\n"
@@ -247,6 +249,7 @@ class Voice2SpecApp(App):
             f"확인 가능한 위치:\n{public_location}\n\n"
             "STT 처리 중..."
         )
+        self._show_popup("Voice2Spec", popup_text)
         threading.Thread(target=self._generate_from_wav, args=(path,), daemon=True).start()
 
     def generate_from_text(self, text: str) -> None:
@@ -338,23 +341,64 @@ class Voice2SpecApp(App):
         marker_path.parent.mkdir(parents=True, exist_ok=True)
         marker_path.write_text(str(path), encoding="utf-8")
 
-    def _describe_recording(self, path: Path) -> str:
+    def _describe_recording(self, path: Path) -> tuple[bool, str]:
         try:
             result = inspect_wav(path)
             size_kb = path.stat().st_size / 1024
-            return (
+            ok = path.exists() and path.stat().st_size > 44 and result.duration_sec >= 0.5
+            status = "녹음 파일 생성 확인됨" if ok else "녹음 파일이 너무 작거나 짧습니다"
+            return ok, (
+                f"{status}\n"
                 f"파일 크기: {size_kb:.1f} KB\n"
                 f"길이: {result.duration_sec:.2f}초\n"
                 f"형식: {result.sample_rate}Hz mono WAV"
             )
         except Exception as exc:
-            return f"파일 정보 확인 실패: {exc}"
+            return False, f"파일 정보 확인 실패: {exc}"
 
     def _export_recording_for_user(self, path: Path) -> str:
         try:
-            return export_wav_to_downloads(path)
+            location = export_wav_to_downloads(path)
+            return f"공개 폴더 복사 성공: {location}"
         except AndroidRecorderError as exc:
             return f"공개 폴더 복사 실패: {exc}"
+
+    def _recording_popup_text(self, recording_ok: bool, recording_info: str, path: Path, public_location: str) -> str:
+        title = "녹음 확인 완료" if recording_ok else "녹음 확인 실패"
+        return (
+            f"{title}\n\n"
+            f"{recording_info}\n\n"
+            f"앱 내부 경로:\n{path}\n\n"
+            f"{public_location}"
+        )
+
+    def _show_popup(self, title: str, text: str) -> None:
+        def open_popup(_dt) -> None:
+            content = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(12))
+            message = Label(
+                text=text,
+                font_name=FONT_NAME,
+                font_size=sp(14),
+                color=(0.05, 0.07, 0.08, 1),
+                halign="left",
+                valign="top",
+            )
+            message.bind(
+                width=lambda instance, value: setattr(instance, "text_size", (value, None)),
+            )
+            close_button = AppButton(text="확인", background_color=(0.00, 0.42, 0.40, 1))
+            content.add_widget(message)
+            content.add_widget(close_button)
+            popup = Popup(
+                title=title,
+                content=content,
+                size_hint=(0.92, 0.62),
+                auto_dismiss=True,
+            )
+            close_button.bind(on_press=lambda *_args: popup.dismiss())
+            popup.open()
+
+        Clock.schedule_once(open_popup, 0)
 
 
 if __name__ == "__main__":
