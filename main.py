@@ -42,7 +42,7 @@ except ImportError as exc:
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "mobile-crud-claude-v2"
+APP_BUILD_LABEL = "mobile-crud-claude-v3"
 DEFAULT_PROVIDER = "claude"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
 
@@ -759,6 +759,8 @@ class Voice2SpecApp(App):
                 f"녹음 파일 확인: {'정상' if ok else '비정상'}\n"
                 f"파일 크기: {size_kb:.1f} KB\n"
                 f"길이: {result.duration_sec:.2f}초\n"
+                f"평균 진폭: {result.average_amplitude:.5f}\n"
+                f"최대 진폭: {result.peak_amplitude:.5f}\n"
                 f"형식: {result.sample_rate}Hz mono WAV"
             )
         except Exception as exc:

@@ -35,6 +35,7 @@ class RecordingResult:
     sample_rate: int
     channels: int
     average_amplitude: float
+    peak_amplitude: float = 0.0
 
 
 def default_recordings_dir() -> Path:
@@ -91,6 +92,7 @@ def inspect_wav(path: Path) -> RecordingResult:
 
     duration_sec = frames / sample_rate if sample_rate else 0.0
     average_amplitude = _average_amplitude(pcm, sample_width)
+    peak_amplitude = _peak_amplitude(pcm, sample_width)
 
     return RecordingResult(
         wav_path=path,
@@ -98,6 +100,7 @@ def inspect_wav(path: Path) -> RecordingResult:
         sample_rate=sample_rate,
         channels=channels,
         average_amplitude=average_amplitude,
+        peak_amplitude=peak_amplitude,
     )
 
 
@@ -106,6 +109,11 @@ def validate_recording(result: RecordingResult) -> None:
         raise RecordingValidationError("녹음 파일이 비어 있습니다.")
     if result.duration_sec < 0.5:
         raise RecordingValidationError("녹음 길이가 0.5초보다 짧습니다.")
+    if result.peak_amplitude == 0.0:
+        raise RecordingValidationError(
+            "녹음 파일은 생성됐지만 오디오 샘플이 모두 0입니다. "
+            "마이크 권한, Android 마이크 개인정보 토글, 또는 녹음 버퍼 읽기 방식을 확인해야 합니다."
+        )
     if result.average_amplitude < MIN_AVERAGE_AMPLITUDE:
         raise RecordingValidationError(
             "녹음 소리가 너무 작습니다. 마이크 입력을 확인하고 조금 더 크게 말해주세요."
@@ -148,3 +156,18 @@ def _average_amplitude(pcm: bytes, sample_width: int) -> float:
         return 0.0
 
     return sum(abs(sample) for sample in samples) / len(samples) / 32768.0
+
+
+def _peak_amplitude(pcm: bytes, sample_width: int) -> float:
+    if not pcm or sample_width != 2:
+        return 0.0
+
+    samples = array("h")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    if not samples:
+        return 0.0
+
+    return max(abs(sample) for sample in samples) / 32768.0

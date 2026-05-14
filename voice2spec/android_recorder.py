@@ -118,7 +118,7 @@ class AndroidWavRecorder:
         AudioFormat = autoclass("android.media.AudioFormat")
         AudioRecord = autoclass("android.media.AudioRecord")
         AudioSource = autoclass("android.media.MediaRecorder$AudioSource")
-        JavaByte = autoclass("java.lang.Byte")
+        JavaShort = autoclass("java.lang.Short")
         JavaArray = autoclass("java.lang.reflect.Array")
 
         channel_config = AudioFormat.CHANNEL_IN_MONO
@@ -151,13 +151,15 @@ class AndroidWavRecorder:
                 f"state={state}"
             )
 
-        byte_buffer = JavaArray.newInstance(JavaByte.TYPE, buffer_bytes)
+        sample_count = buffer_bytes // 2
+        short_buffer = JavaArray.newInstance(JavaShort.TYPE, sample_count)
 
         with self._output_path.open("wb") as wav_file:
             wav_file.write(_wav_header_placeholder())
             recording_started = False
             chunks_read = 0
             last_report_bytes = 0
+            peak_abs = 0
             try:
                 audio_record.startRecording()
                 recording_state = audio_record.getRecordingState()
@@ -170,16 +172,20 @@ class AndroidWavRecorder:
                 recording_started = True
 
                 while not self._stop_event.is_set():
-                    read_count = audio_record.read(byte_buffer, 0, buffer_bytes)
+                    read_count = audio_record.read(short_buffer, 0, sample_count)
                     if read_count > 0:
-                        chunk = bytes(int(byte_buffer[index]) & 0xFF for index in range(read_count))
+                        samples = [int(short_buffer[index]) for index in range(read_count)]
+                        chunk_peak = max((abs(sample) for sample in samples), default=0)
+                        peak_abs = max(peak_abs, chunk_peak)
+                        chunk = struct.pack(f"<{read_count}h", *samples)
                         wav_file.write(chunk)
-                        self._bytes_written += read_count
+                        self._bytes_written += read_count * 2
                         chunks_read += 1
                         if chunks_read == 1 or self._bytes_written - last_report_bytes >= 64 * 1024:
                             self._log(
                                 "AudioRecord.read ok "
-                                f"chunks={chunks_read} bytes={self._bytes_written}"
+                                f"chunks={chunks_read} bytes={self._bytes_written} "
+                                f"chunk_peak={chunk_peak} peak={peak_abs}"
                             )
                             last_report_bytes = self._bytes_written
                     elif read_count < 0:
