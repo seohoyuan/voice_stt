@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -39,6 +40,7 @@ class SttConfig:
 
 
 CommandRunner = Callable[[list[str], int], str]
+EventLogger = Callable[[str], None]
 
 
 class WhisperCppTranscriber(Transcriber):
@@ -51,19 +53,33 @@ class WhisperCppTranscriber(Transcriber):
     app storage or packaged assets, then passed through SttConfig.
     """
 
-    def __init__(self, config: SttConfig | None = None, runner: CommandRunner | None = None) -> None:
+    def __init__(
+        self,
+        config: SttConfig | None = None,
+        runner: CommandRunner | None = None,
+        event_logger: EventLogger | None = None,
+    ) -> None:
         self.config = config or SttConfig.from_env()
-        self.runner = runner or _run_command
+        self.runner = runner or run_whisper_command
+        self.event_logger = event_logger
 
     def transcribe(self, source: str | Path) -> TranscriptResult:
         wav_path = Path(source)
+        self._log(f"stt.validate started wav={wav_path}")
         self._validate(wav_path)
+        self._log("stt.validate completed")
 
         command = self.build_command(wav_path)
+        self._log(f"stt.command built: {redact_command(command)}")
+        started_at = time.monotonic()
         output = self.runner(command, self.config.timeout_sec)
+        elapsed = time.monotonic() - started_at
+        self._log(f"stt.command completed elapsed={elapsed:.1f}s output_chars={len(output)}")
         text = clean_whisper_output(output)
         if not text:
+            self._log("stt.output empty after cleanup")
             raise SttError("STT 결과가 비어 있습니다.")
+        self._log(f"stt.output cleaned chars={len(text)}")
 
         return TranscriptResult(
             text=text,
@@ -106,11 +122,26 @@ class WhisperCppTranscriber(Transcriber):
             raise SttNotConfiguredError(f"whisper.cpp 모델 파일을 찾지 못했습니다: {self.config.model_path}")
         if not self.config.binary_path.exists():
             raise SttNotConfiguredError(f"whisper.cpp 실행 파일을 찾지 못했습니다: {self.config.binary_path}")
+        self._log(
+            "stt.files found "
+            f"binary={self.config.binary_path} binary_size={self.config.binary_path.stat().st_size} "
+            f"model={self.config.model_path} model_size={self.config.model_path.stat().st_size} "
+            f"wav_size={wav_path.stat().st_size}"
+        )
         try:
             mode = self.config.binary_path.stat().st_mode
             self.config.binary_path.chmod(mode | 0o111)
+            self._log(f"stt.binary chmod ok mode={oct(self.config.binary_path.stat().st_mode)}")
         except OSError as exc:
             raise SttNotConfiguredError(f"whisper.cpp 실행 권한 설정 실패: {exc}") from exc
+
+    def _log(self, message: str) -> None:
+        if self.event_logger is None:
+            return
+        try:
+            self.event_logger(message)
+        except Exception:
+            pass
 
 
 def clean_whisper_output(output: str) -> str:
@@ -137,8 +168,13 @@ def clean_whisper_output(output: str) -> str:
     return " ".join(lines).strip()
 
 
-def _run_command(command: list[str], timeout_sec: int) -> str:
+def redact_command(command: list[str]) -> str:
+    return " ".join(command)
+
+
+def run_whisper_command(command: list[str], timeout_sec: int) -> str:
     try:
+        started_at = time.monotonic()
         completed = subprocess.run(
             command,
             check=False,
@@ -149,9 +185,16 @@ def _run_command(command: list[str], timeout_sec: int) -> str:
             timeout=timeout_sec,
         )
     except subprocess.TimeoutExpired as exc:
-        raise SttError("STT 실행 시간이 초과되었습니다.") from exc
+        raise SttError(f"STT 실행 시간이 {timeout_sec}초를 초과했습니다.") from exc
 
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     if completed.returncode != 0:
-        raise SttError(f"STT 실행 실패: {output.strip()}")
+        elapsed = time.monotonic() - started_at
+        raise SttError(
+            f"STT 실행 실패(returncode={completed.returncode}, elapsed={elapsed:.1f}s): {output.strip()}"
+        )
     return output
+
+
+def _run_command(command: list[str], timeout_sec: int) -> str:
+    return run_whisper_command(command, timeout_sec)

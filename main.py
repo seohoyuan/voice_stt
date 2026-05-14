@@ -16,7 +16,14 @@ from voice2spec.android_recorder import (
 )
 from voice2spec.recorder import inspect_wav
 from voice2spec.storage import save_idea
-from voice2spec.stt import SttConfig, SttError, SttNotConfiguredError, WhisperCppTranscriber
+from voice2spec.stt import (
+    SttConfig,
+    SttError,
+    SttNotConfiguredError,
+    WhisperCppTranscriber,
+    redact_command,
+    run_whisper_command,
+)
 
 
 try:
@@ -36,7 +43,7 @@ except ImportError as exc:  # Allows CLI/tests to run without Kivy installed.
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "stt-whisper-small-v1"
+APP_BUILD_LABEL = "stt-whisper-small-v2"
 
 
 def register_korean_font() -> str:
@@ -233,6 +240,8 @@ class Voice2SpecApp(App):
         self._recording_started_at: datetime | None = None
         self._recording_tick_event = None
         self._recording_runtime_error_shown = False
+        self._stt_started_at: datetime | None = None
+        self._stt_tick_event = None
 
     def build(self):
         global FONT_NAME
@@ -387,38 +396,94 @@ class Voice2SpecApp(App):
 
     def _generate_from_wav(self, wav_path: Path) -> None:
         self._log_event(f"stt.pipeline started wav={wav_path}")
+        self._start_stt_monitor(wav_path)
+        self._schedule_result(
+            status="STT 준비 중",
+            text=(
+                "녹음 파일 저장은 완료되었습니다.\n\n"
+                f"{wav_path}\n\n"
+                "STT 준비 중입니다. whisper 실행 파일과 모델 파일을 확인하고 있습니다.\n\n"
+                f"진단 로그:\n{self._diagnostics_log_path()}"
+            ),
+        )
         try:
-            transcriber = WhisperCppTranscriber(self._stt_config())
+            config = self._stt_config()
+            self._log_stt_config(config, wav_path)
+            start_log_location = self._export_log_for_user()
+            self._schedule_result(
+                status="STT 실행 중",
+                text=(
+                    "whisper.cpp STT를 실행하고 있습니다.\n"
+                    "첫 실행은 모델 로딩 때문에 오래 걸릴 수 있습니다.\n\n"
+                    f"WAV:\n{wav_path}\n\n"
+                    f"모델:\n{config.model_path}\n\n"
+                    f"진단 로그:\n{start_log_location}"
+                ),
+            )
+            transcriber = WhisperCppTranscriber(
+                config,
+                runner=self._run_stt_command,
+                event_logger=self._log_event,
+            )
+            self._log_event("stt.run_pipeline calling transcriber/refiner/specifier")
             transcript, idea, spec, validation = run_pipeline(wav_path, transcriber=transcriber)
+            self._log_event(
+                "stt.run_pipeline completed "
+                f"transcript_chars={len(transcript.text)} screens={len(spec.screens)} "
+                f"validation_passed={validation.passed}"
+            )
             markdown_path, _ = save_idea(self._ideas_dir(), transcript, idea, spec, validation)
         except SttNotConfiguredError as exc:
             self._log_event(f"stt.not_configured: {exc}")
+            log_location = self._export_log_for_user()
+            self._stop_stt_monitor()
             self._schedule_result(
                 status="STT 설정 필요",
                 text=(
                     f"녹음 파일은 저장되었습니다.\n\n{wav_path}\n\n"
                     f"{exc}\n\n"
                     "whisper.cpp Android 파일과 모델을 넣으면 이 녹음이 텍스트로 변환됩니다.\n\n"
-                    f"진단 로그:\n{self._diagnostics_log_path()}"
+                    f"진단 로그:\n{log_location}"
                 ),
             )
             return
         except SttError as exc:
             self._log_event(f"stt.failed: {exc}")
+            log_location = self._export_log_for_user()
+            self._stop_stt_monitor()
             self._schedule_result(
                 status="STT 실패",
                 text=(
                     f"녹음 파일은 저장되었습니다.\n\n{wav_path}\n\n"
                     f"STT 실패: {exc}\n\n"
-                    f"진단 로그:\n{self._diagnostics_log_path()}"
+                    f"진단 로그:\n{log_location}"
+                ),
+            )
+            return
+        except Exception as exc:
+            self._log_event(f"stt.unexpected_error: {type(exc).__name__}: {exc}")
+            log_location = self._export_log_for_user()
+            self._stop_stt_monitor()
+            self._schedule_result(
+                status="STT 오류",
+                text=(
+                    f"녹음 파일은 저장되었습니다.\n\n{wav_path}\n\n"
+                    f"예상하지 못한 STT 오류: {type(exc).__name__}: {exc}\n\n"
+                    f"진단 로그:\n{log_location}"
                 ),
             )
             return
 
         self._log_event(f"stt.pipeline succeeded markdown={markdown_path}")
+        log_location = self._export_log_for_user()
+        self._stop_stt_monitor()
         self._schedule_result(
             status=f"저장 완료: {markdown_path.name}",
-            text=f"STT 결과:\n{transcript.text}\n\n{self._format_spec_result(spec.title, spec.summary, spec.screens)}",
+            text=(
+                f"STT 결과:\n{transcript.text}\n\n"
+                f"{self._format_spec_result(spec.title, spec.summary, spec.screens)}\n\n"
+                f"진단 로그:\n{log_location}"
+            ),
         )
 
     def _format_spec_result(self, title: str, summary: str, screens) -> str:
@@ -451,6 +516,28 @@ class Voice2SpecApp(App):
             language="ko",
             threads=4,
         )
+
+    def _log_stt_config(self, config: SttConfig, wav_path: Path) -> None:
+        self._log_event(
+            "stt.config "
+            f"binary={config.binary_path} binary_exists={config.binary_path.exists() if config.binary_path else None} "
+            f"model={config.model_path} model_exists={config.model_path.exists() if config.model_path else None} "
+            f"wav={wav_path} wav_exists={wav_path.exists()} "
+            f"language={config.language} threads={config.threads} timeout={config.timeout_sec}"
+        )
+
+    def _run_stt_command(self, command: list[str], timeout_sec: int) -> str:
+        self._log_event(f"stt.subprocess starting timeout={timeout_sec}s command={redact_command(command)}")
+        self._export_log_for_user()
+        try:
+            output = run_whisper_command(command, timeout_sec)
+        except Exception as exc:
+            self._log_event(f"stt.subprocess raised {type(exc).__name__}: {exc}")
+            self._export_log_for_user()
+            raise
+        self._log_event(f"stt.subprocess finished output_chars={len(output)}")
+        self._export_log_for_user()
+        return output
 
     def _first_existing(self, *paths: Path) -> Path:
         for path in paths:
@@ -572,6 +659,32 @@ class Voice2SpecApp(App):
             return True
 
         self.root_widget.set_recording_state(f"녹음 상태: 스레드 중지됨 | {elapsed}초 | 수신 {kb:.1f} KB")
+        return True
+
+    def _start_stt_monitor(self, wav_path: Path) -> None:
+        self._stop_stt_monitor()
+        self._stt_started_at = datetime.now()
+        self._log_event(f"stt.monitor started wav={wav_path}")
+        self._stt_tick_event = Clock.schedule_interval(self._update_stt_monitor, 2.0)
+
+    def _stop_stt_monitor(self) -> None:
+        if self._stt_tick_event is not None:
+            self._stt_tick_event.cancel()
+            self._stt_tick_event = None
+        if self._stt_started_at is not None:
+            elapsed = int((datetime.now() - self._stt_started_at).total_seconds())
+            self._log_event(f"stt.monitor stopped elapsed={elapsed}s")
+            self._stt_started_at = None
+
+    def _update_stt_monitor(self, _dt) -> bool:
+        if self.root_widget is None or self._stt_started_at is None:
+            return False
+
+        elapsed = int((datetime.now() - self._stt_started_at).total_seconds())
+        self.root_widget.set_status(f"STT 처리 중... {elapsed}초")
+        self.root_widget.set_recording_state(f"STT 상태: whisper.cpp 실행 중 | {elapsed}초")
+        if elapsed > 0 and elapsed % 30 == 0:
+            self._log_event(f"stt.monitor heartbeat elapsed={elapsed}s")
         return True
 
     def _diagnostics_log_path(self) -> Path:
