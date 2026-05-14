@@ -57,8 +57,11 @@ def register_korean_font() -> str:
     ]
     for font_path in candidates:
         if font_path.exists():
-            LabelBase.register(name="Voice2SpecKR", fn_regular=str(font_path))
-            return "Voice2SpecKR"
+            try:
+                LabelBase.register(name="Voice2SpecKR", fn_regular=str(font_path))
+                return "Voice2SpecKR"
+            except Exception:
+                continue
     return "Roboto"
 
 
@@ -194,14 +197,34 @@ class Voice2SpecApp(App):
         global FONT_NAME
         FONT_NAME = register_korean_font()
         Window.clearcolor = (0.94, 0.97, 0.96, 1)
-        load_env_file()
-        self.settings.update(self._load_settings())
-        self._apply_settings_to_env()
-        self._log_event(f"app.build started build={APP_BUILD_LABEL}")
-
         self.root_widget = Voice2SpecRoot(self)
         self.show_create()
+        self._safe_startup_init()
+        self._log_event(f"app.build started build={APP_BUILD_LABEL}")
         return self.root_widget
+
+    def _safe_startup_init(self) -> None:
+        startup_notes: list[str] = []
+        try:
+            load_env_file()
+        except Exception as exc:
+            startup_notes.append(f".env 로드 실패: {type(exc).__name__}: {exc}")
+        try:
+            self.settings.update(self._load_settings())
+        except Exception as exc:
+            startup_notes.append(f"설정 로드 실패: {type(exc).__name__}: {exc}")
+        try:
+            self._apply_settings_to_env()
+        except Exception as exc:
+            startup_notes.append(f"환경변수 적용 실패: {type(exc).__name__}: {exc}")
+
+        if startup_notes:
+            self._log_event("startup init warnings: " + " | ".join(startup_notes))
+            self._set_result(
+                "앱은 시작됐지만 초기 설정 중 경고가 있습니다.\n\n"
+                + "\n".join(startup_notes)
+                + f"\n\n진단 로그:\n{self._diagnostics_log_path()}"
+            )
 
     def _build_crash_screen(self, exc: Exception):
         layout = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
@@ -232,8 +255,17 @@ class Voice2SpecApp(App):
             background_color=(1, 1, 1, 1),
             foreground_color=(0.05, 0.07, 0.08, 1),
         )
+        copy_log = AppButton(text="진단 로그 복사", background_color=(0.00, 0.45, 0.40, 1))
+        copy_log.bind(
+            on_press=lambda *_args: setattr(
+                body,
+                "text",
+                body.text + "\n\n" + self._export_log_for_user(),
+            )
+        )
         layout.add_widget(title)
         layout.add_widget(body)
+        layout.add_widget(copy_log)
         return layout
 
     def show_create(self) -> None:
