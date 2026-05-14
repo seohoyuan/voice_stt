@@ -80,33 +80,31 @@ class Surface(BoxLayout):
 
 class AppButton(Button):
     def __init__(self, **kwargs) -> None:
-        super().__init__(
-            font_name=FONT_NAME,
-            font_size=sp(15),
-            size_hint_y=None,
-            height=dp(48),
-            background_normal="",
-            background_down="",
-            color=(1, 1, 1, 1),
-            **kwargs,
-        )
+        kwargs.setdefault("font_name", FONT_NAME)
+        kwargs.setdefault("font_size", sp(15))
+        kwargs.setdefault("size_hint_y", None)
+        kwargs.setdefault("height", dp(48))
+        kwargs.setdefault("background_normal", "")
+        kwargs.setdefault("background_down", "")
+        kwargs.setdefault("color", (1, 1, 1, 1))
+        super().__init__(**kwargs)
 
 
 class SmallButton(AppButton):
     def __init__(self, **kwargs) -> None:
-        super().__init__(font_size=sp(13), height=dp(42), **kwargs)
+        kwargs.setdefault("font_size", sp(13))
+        kwargs.setdefault("height", dp(42))
+        super().__init__(**kwargs)
 
 
 class BodyLabel(Label):
     def __init__(self, **kwargs) -> None:
-        super().__init__(
-            font_name=FONT_NAME,
-            font_size=sp(14),
-            color=(0.16, 0.20, 0.22, 1),
-            halign="left",
-            valign="top",
-            **kwargs,
-        )
+        kwargs.setdefault("font_name", FONT_NAME)
+        kwargs.setdefault("font_size", sp(14))
+        kwargs.setdefault("color", (0.16, 0.20, 0.22, 1))
+        kwargs.setdefault("halign", "left")
+        kwargs.setdefault("valign", "top")
+        super().__init__(**kwargs)
         self.bind(width=lambda instance, value: setattr(instance, "text_size", (value, None)))
 
 
