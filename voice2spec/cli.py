@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 
 from .agents import run_pipeline
+from .desktop_pipeline import DesktopPipelineConfig, generate_spec_from_text, run_desktop_pipeline
+from .llm_specifier import LlmSpecError
 from .recorder import (
     RecordingConfig,
     RecordingDependencyError,
@@ -54,6 +56,12 @@ def main() -> None:
     parser.add_argument("--whisper-bin", help="whisper.cpp 실행 파일 경로")
     parser.add_argument("--whisper-model", help="whisper.cpp 모델 파일 경로")
     parser.add_argument("--stt-language", default="ko", help="STT 언어 코드, 기본 ko")
+    parser.add_argument(
+        "--provider",
+        default="rule",
+        choices=["rule", "openai", "codex", "claude", "anthropic"],
+        help="명세 생성 provider. 기본 rule, API는 openai/codex/claude",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -67,6 +75,16 @@ def main() -> None:
     record_parser = subparsers.add_parser("record", help="마이크로 WAV 파일 녹음")
     record_parser.add_argument("--duration", type=float, default=10.0, help="녹음 길이(초), 기본 10초")
     record_parser.add_argument("--generate", action="store_true", help="녹음 후 현재 mock STT 파이프라인으로 명세 생성")
+
+    desktop_parser = subparsers.add_parser(
+        "desktop-run",
+        help="노트북 마이크 녹음 -> whisper STT -> API/rule 명세 생성 -> 저장",
+    )
+    desktop_parser.add_argument("--duration", type=float, default=10.0, help="녹음 길이(초), 기본 10초")
+
+    spec_parser = subparsers.add_parser("spec", help="텍스트를 API/rule provider로 명세서로 변환")
+    spec_parser.add_argument("input", nargs="*", help="아이디어 텍스트")
+    spec_parser.add_argument("--stdin", action="store_true", help="표준 입력에서 아이디어 텍스트 읽기")
 
     subparsers.add_parser("list", help="저장된 아이디어 목록 보기")
 
@@ -111,6 +129,15 @@ def main() -> None:
 
     if args.command == "record":
         _record_command(recordings_dir, output_dir, args.duration, args.generate, stt_config)
+        return
+
+    if args.command == "desktop-run":
+        _desktop_run_command(recordings_dir, output_dir, args.duration, stt_config, args.provider)
+        return
+
+    if args.command == "spec":
+        text = _read_text_input(args.input, args.stdin, "아이디어를 입력하세요: ")
+        _spec_command(output_dir, text, args.provider)
         return
 
     if args.command == "edit":
@@ -215,6 +242,55 @@ def _record_command(
     if generate:
         print("명세 생성: whisper.cpp 설정이 있으면 실제 STT를 사용합니다.")
         _new_command(output_dir, str(result.wav_path), stt_config)
+
+
+def _desktop_run_command(
+    recordings_dir: Path,
+    output_dir: Path,
+    duration: float,
+    stt_config: SttConfig | None,
+    provider: str,
+) -> None:
+    try:
+        result = run_desktop_pipeline(
+            DesktopPipelineConfig(
+                recordings_dir=recordings_dir,
+                ideas_dir=output_dir,
+                duration_sec=duration,
+                stt_config=stt_config,
+                spec_provider=provider,
+            ),
+            logger=lambda message: print(f"[desktop] {message}"),
+        )
+    except (RecordingDependencyError, RecordingValidationError, SttError, LlmSpecError, ValueError) as exc:
+        print(f"desktop-run 실패: {exc}")
+        return
+
+    print("\n완료")
+    print(f"WAV: {result.recording.wav_path}")
+    print(f"Transcript: {result.transcript.text}")
+    print(f"Title: {result.spec.title}")
+    print(f"Markdown: {result.markdown_path}")
+    print(f"JSON: {result.json_path}")
+
+
+def _spec_command(output_dir: Path, text: str, provider: str) -> None:
+    try:
+        _transcript, _idea, spec, validation, markdown_path, json_path = generate_spec_from_text(
+            text=text,
+            ideas_dir=output_dir,
+            spec_provider=provider,
+            logger=lambda message: print(f"[spec] {message}"),
+        )
+    except LlmSpecError as exc:
+        print(f"명세 생성 실패: {exc}")
+        return
+
+    print(f"Title: {spec.title}")
+    print(f"Summary: {spec.summary}")
+    print(f"Validation: {validation.passed}")
+    print(f"Markdown: {markdown_path}")
+    print(f"JSON: {json_path}")
 
 
 def _list_command(output_dir: Path) -> None:

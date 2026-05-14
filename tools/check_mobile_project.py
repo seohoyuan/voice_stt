@@ -12,6 +12,8 @@ REQUIRED_FILES = [
     "voice2spec/android_recorder.py",
     "voice2spec/stt.py",
     "voice2spec/agents.py",
+    "voice2spec/desktop_pipeline.py",
+    "voice2spec/llm_specifier.py",
     "voice2spec/storage.py",
     "bin/.gitkeep",
     "models/.gitkeep",
@@ -47,6 +49,7 @@ def main() -> None:
     workflow_snippets = [
         "Prepare whisper.cpp STT",
         "bash tools/prepare_whisper_android.sh",
+        "bundle_stt",
     ]
     missing_workflow_snippets = [snippet for snippet in workflow_snippets if snippet not in workflow]
 

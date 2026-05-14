@@ -2,6 +2,16 @@
 
 Voice2Spec는 모바일에서 아이디어를 입력하거나 녹음하고, 이를 명세서와 화면 흐름 설명으로 바꾸는 개인용 앱 프로토타입입니다.
 
+## 현재 개발 방향
+
+현재 우선순위는 **노트북 Python MVP를 먼저 완성**하는 것입니다.
+
+```text
+노트북 마이크 녹음 -> whisper.cpp STT -> OpenAI/Claude API 명세 생성 -> Markdown 저장
+```
+
+Android APK는 이 파이프라인이 안정화된 뒤, 마이크 입력과 STT 실행부만 Android용으로 바꿔 포팅합니다. 자세한 실행법은 `DESKTOP_MVP.md`를 봅니다.
+
 현재 프로젝트는 두 층으로 나뉩니다.
 
 - `voice2spec/`: 앱의 핵심 파이프라인과 저장 로직
@@ -14,8 +24,8 @@ Voice2Spec는 모바일에서 아이디어를 입력하거나 녹음하고, 이�
 - 모바일 한글 UI: Noto Sans CJK KR 폰트를 APK 빌드 시 포함
 - 텍스트 입력 → 명세 생성: 구현
 - Markdown/JSON 저장: 구현
-- STT 음성 → 텍스트 변환: 어댑터 구현, 실제 바이너리/모델 필요
-- LLM 명세 생성: 아직 rule 기반
+- STT 음성 → 텍스트 변환: whisper.cpp 어댑터 구현, PC/Android 실행 파일과 모델 필요
+- LLM 명세 생성: rule 기반 + OpenAI/Claude API provider 지원
 
 즉, 갤럭시 폴드4에서 녹음 파일을 저장한 뒤 STT 어댑터로 넘기는 흐름까지 연결되어 있습니다. 실제 인식에는 whisper.cpp 실행 파일과 모델 파일이 필요합니다.
 
