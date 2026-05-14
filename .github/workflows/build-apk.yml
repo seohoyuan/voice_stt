@@ -6,7 +6,7 @@ on:
       bundle_stt:
         description: "Bundle whisper.cpp STT engine and ggml-small-q5_1 model"
         required: false
-        default: "false"
+        default: "true"
   push:
     branches:
       - main
@@ -87,7 +87,7 @@ jobs:
           test -s assets/fonts/NotoSansCJKkr-Regular.otf
 
       - name: Prepare whisper.cpp STT
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.bundle_stt == 'true' }}
+        if: ${{ github.event_name == 'push' || inputs.bundle_stt == 'true' }}
         run: bash tools/prepare_whisper_android.sh
 
       - name: Build APK

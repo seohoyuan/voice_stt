@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WHISPER_REPO_URL="${WHISPER_REPO_URL:-https://github.com/ggml-org/whisper.cpp.git}"
-WHISPER_REF="${WHISPER_REF:-v1.8.1}"
+WHISPER_REF="${WHISPER_REF:-v1.8.4}"
 WHISPER_DIR="$ROOT_DIR/external/whisper.cpp"
 BUILD_DIR="$WHISPER_DIR/build-android"
 NDK_VERSION="${ANDROID_NDK_VERSION:-26.3.11579264}"

@@ -42,7 +42,7 @@ except ImportError as exc:
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "mobile-crud-claude-v1"
+APP_BUILD_LABEL = "mobile-crud-claude-v2"
 DEFAULT_PROVIDER = "claude"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
 
@@ -184,6 +184,13 @@ class Voice2SpecApp(App):
         }
 
     def build(self):
+        try:
+            return self._build_app()
+        except Exception as exc:
+            self._write_startup_crash(exc)
+            return self._build_crash_screen(exc)
+
+    def _build_app(self):
         global FONT_NAME
         FONT_NAME = register_korean_font()
         Window.clearcolor = (0.94, 0.97, 0.96, 1)
@@ -192,15 +199,42 @@ class Voice2SpecApp(App):
         self._apply_settings_to_env()
         self._log_event(f"app.build started build={APP_BUILD_LABEL}")
 
-        try:
-            request_record_audio_permission()
-            self._log_event("record audio permission requested")
-        except AndroidRecorderError as exc:
-            self._log_event(f"record audio permission request skipped/failed: {exc}")
-
         self.root_widget = Voice2SpecRoot(self)
         self.show_create()
         return self.root_widget
+
+    def _build_crash_screen(self, exc: Exception):
+        layout = BoxLayout(orientation="vertical", spacing=dp(12), padding=dp(16))
+        with layout.canvas.before:
+            Color(0.08, 0.10, 0.11, 1)
+            background = Rectangle(pos=layout.pos, size=layout.size)
+        layout.bind(pos=lambda *_args: setattr(background, "pos", layout.pos))
+        layout.bind(size=lambda *_args: setattr(background, "size", layout.size))
+        title = Label(
+            text="Voice2Spec 시작 실패",
+            font_name=FONT_NAME,
+            font_size=sp(24),
+            bold=True,
+            color=(1, 1, 1, 1),
+            size_hint_y=None,
+            height=dp(56),
+        )
+        body = TextInput(
+            text=(
+                "앱 시작 중 오류가 발생했습니다.\n\n"
+                f"{type(exc).__name__}: {exc}\n\n"
+                f"내부 로그:\n{self._diagnostics_log_path()}"
+            ),
+            readonly=True,
+            multiline=True,
+            font_name=FONT_NAME,
+            font_size=sp(14),
+            background_color=(1, 1, 1, 1),
+            foreground_color=(0.05, 0.07, 0.08, 1),
+        )
+        layout.add_widget(title)
+        layout.add_widget(body)
+        return layout
 
     def show_create(self) -> None:
         if self.root_widget is None:
@@ -727,6 +761,19 @@ class Voice2SpecApp(App):
             timestamp = datetime.now().isoformat(timespec="seconds")
             with log_path.open("a", encoding="utf-8") as log_file:
                 log_file.write(f"{timestamp} [{APP_BUILD_LABEL}] {message}\n")
+        except Exception:
+            pass
+
+    def _write_startup_crash(self, exc: Exception) -> None:
+        try:
+            log_path = self._diagnostics_log_path()
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().isoformat(timespec="seconds")
+            with log_path.open("a", encoding="utf-8") as log_file:
+                log_file.write(
+                    f"{timestamp} [{APP_BUILD_LABEL}] startup crash: "
+                    f"{type(exc).__name__}: {exc}\n"
+                )
         except Exception:
             pass
 
