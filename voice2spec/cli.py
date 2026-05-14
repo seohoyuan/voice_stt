@@ -6,7 +6,13 @@ import sys
 from pathlib import Path
 
 from .agents import run_pipeline
-from .desktop_pipeline import DesktopPipelineConfig, generate_spec_from_text, run_desktop_pipeline
+from .desktop_pipeline import (
+    DesktopPipelineConfig,
+    generate_spec_from_text,
+    generate_spec_from_transcript,
+    run_desktop_pipeline,
+)
+from .env import load_env_file
 from .llm_specifier import LlmSpecError
 from .recorder import (
     RecordingConfig,
@@ -36,6 +42,7 @@ def _configure_stdout() -> None:
 
 def main() -> None:
     _configure_stdout()
+    load_env_file()
 
     parser = argparse.ArgumentParser(description="Voice2Spec Python prototype")
     parser.add_argument(
@@ -70,7 +77,8 @@ def main() -> None:
     new_parser.add_argument("--stdin", action="store_true", help="표준 입력에서 아이디어 텍스트 읽기")
 
     transcribe_parser = subparsers.add_parser("transcribe", help="WAV 파일을 whisper.cpp로 텍스트화")
-    transcribe_parser.add_argument("wav_path", help="녹음 WAV 파일 경로")
+    transcribe_parser.add_argument("wav_path", nargs="?", help="녹음 WAV 파일 경로")
+    transcribe_parser.add_argument("--latest", action="store_true", help="가장 최근 녹음 WAV 사용")
 
     record_parser = subparsers.add_parser("record", help="마이크로 WAV 파일 녹음")
     record_parser.add_argument("--duration", type=float, default=10.0, help="녹음 길이(초), 기본 10초")
@@ -120,15 +128,15 @@ def main() -> None:
 
     if args.command == "new":
         text = _read_text_input(args.input, args.stdin, "아이디어를 입력하세요: ")
-        _new_command(output_dir, text, stt_config)
+        _new_command(output_dir, text, stt_config, args.provider)
         return
 
     if args.command == "transcribe":
-        _transcribe_command(args.wav_path, stt_config)
+        _transcribe_command(args.wav_path, stt_config, recordings_dir, args.latest)
         return
 
     if args.command == "record":
-        _record_command(recordings_dir, output_dir, args.duration, args.generate, stt_config)
+        _record_command(recordings_dir, output_dir, args.duration, args.generate, stt_config, args.provider)
         return
 
     if args.command == "desktop-run":
@@ -173,7 +181,7 @@ def _read_text_input(parts: list[str] | None, read_stdin: bool, prompt: str) -> 
 
 def _stt_config_from_args(args) -> SttConfig | None:
     if not args.whisper_bin and not args.whisper_model:
-        return None
+        return SttConfig.from_env(language_override=args.stt_language)
     return SttConfig(
         binary_path=Path(args.whisper_bin) if args.whisper_bin else None,
         model_path=Path(args.whisper_model) if args.whisper_model else None,
@@ -181,19 +189,39 @@ def _stt_config_from_args(args) -> SttConfig | None:
     )
 
 
-def _new_command(output_dir: Path, text_or_wav: str, stt_config: SttConfig | None = None) -> None:
-    transcriber = None
-    if Path(text_or_wav).suffix.lower() == ".wav" and stt_config is not None:
-        transcriber = WhisperCppTranscriber(stt_config)
-
-    transcript, idea, spec, validation = run_pipeline(text_or_wav, transcriber=transcriber)
-    markdown_path, json_path = save_idea(
-        output_dir=output_dir,
-        transcript=transcript,
-        idea=idea,
-        spec=spec,
-        validation=validation,
-    )
+def _new_command(
+    output_dir: Path,
+    text_or_wav: str,
+    stt_config: SttConfig | None = None,
+    provider: str = "rule",
+) -> None:
+    if Path(text_or_wav).suffix.lower() == ".wav":
+        try:
+            print("STT 처리 중...")
+            transcript = WhisperCppTranscriber(stt_config).transcribe(text_or_wav)
+            print(f"STT 완료: {transcript.text}")
+            print(f"명세 생성 중: provider={provider}")
+            _transcript, idea, spec, validation, markdown_path, json_path = generate_spec_from_transcript(
+                transcript=transcript,
+                ideas_dir=output_dir,
+                spec_provider=provider,
+                logger=lambda message: print(f"[new] {message}"),
+            )
+        except (SttError, LlmSpecError) as exc:
+            print(f"생성 실패: {exc}")
+            return
+    else:
+        try:
+            print(f"명세 생성 중: provider={provider}")
+            _transcript, idea, spec, validation, markdown_path, json_path = generate_spec_from_text(
+                text=text_or_wav,
+                ideas_dir=output_dir,
+                spec_provider=provider,
+                logger=lambda message: print(f"[new] {message}"),
+            )
+        except LlmSpecError as exc:
+            print(f"생성 실패: {exc}")
+            return
 
     print(f"제목: {spec.title}")
     print(f"요약: {spec.summary}")
@@ -202,15 +230,35 @@ def _new_command(output_dir: Path, text_or_wav: str, stt_config: SttConfig | Non
     print(f"JSON: {json_path}")
 
 
-def _transcribe_command(wav_path: str, stt_config: SttConfig | None) -> None:
+def _transcribe_command(
+    wav_path: str | None,
+    stt_config: SttConfig | None,
+    recordings_dir: Path,
+    use_latest: bool = False,
+) -> None:
+    resolved_wav = _resolve_transcribe_wav(wav_path, recordings_dir, use_latest)
+    if resolved_wav is None:
+        print("STT 실패: WAV 파일 경로가 없고 최근 녹음 파일도 없습니다.")
+        return
+
     try:
         transcriber = WhisperCppTranscriber(stt_config)
-        transcript = transcriber.transcribe(wav_path)
+        transcript = transcriber.transcribe(resolved_wav)
     except SttError as exc:
         print(f"STT 실패: {exc}")
         return
 
     print(transcript.text)
+
+
+def _resolve_transcribe_wav(wav_path: str | None, recordings_dir: Path, use_latest: bool) -> Path | None:
+    if wav_path and not use_latest:
+        return Path(wav_path)
+
+    wav_files = sorted(recordings_dir.glob("*.wav"), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not wav_files:
+        return None
+    return wav_files[0]
 
 
 def _record_command(
@@ -219,6 +267,7 @@ def _record_command(
     duration: float,
     generate: bool,
     stt_config: SttConfig | None = None,
+    provider: str = "rule",
 ) -> None:
     print(f"녹음 시작: {duration:.1f}초")
     try:
@@ -241,7 +290,7 @@ def _record_command(
 
     if generate:
         print("명세 생성: whisper.cpp 설정이 있으면 실제 STT를 사용합니다.")
-        _new_command(output_dir, str(result.wav_path), stt_config)
+        _new_command(output_dir, str(result.wav_path), stt_config, provider)
 
 
 def _desktop_run_command(

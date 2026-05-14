@@ -9,6 +9,21 @@ from typing import Callable
 
 from .agents import Transcriber
 from .models import Segment, TranscriptResult
+from .recorder import MIN_AVERAGE_AMPLITUDE, inspect_wav
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_WHISPER_BIN_PATTERNS = (
+    "bin/whisper-cli.exe",
+    "bin/**/whisper-cli.exe",
+    "bin/main.exe",
+    "bin/**/main.exe",
+)
+DEFAULT_WHISPER_MODEL_PATTERNS = (
+    "models/ggml-small-q5_1.bin",
+    "models/ggml-base-q5_1.bin",
+    "models/*.bin",
+)
 
 
 class SttError(RuntimeError):
@@ -28,13 +43,13 @@ class SttConfig:
     threads: int = 4
 
     @classmethod
-    def from_env(cls) -> "SttConfig":
+    def from_env(cls, language_override: str | None = None) -> "SttConfig":
         binary = os.environ.get("VOICE2SPEC_WHISPER_BIN")
         model = os.environ.get("VOICE2SPEC_WHISPER_MODEL")
-        language = os.environ.get("VOICE2SPEC_STT_LANGUAGE", "ko")
+        language = language_override or os.environ.get("VOICE2SPEC_STT_LANGUAGE", "ko")
         return cls(
-            binary_path=Path(binary) if binary else None,
-            model_path=Path(model) if model else None,
+            binary_path=Path(binary) if binary else find_default_whisper_binary(),
+            model_path=Path(model) if model else find_default_whisper_model(),
             language=language,
         )
 
@@ -122,11 +137,25 @@ class WhisperCppTranscriber(Transcriber):
             raise SttNotConfiguredError(f"whisper.cpp 모델 파일을 찾지 못했습니다: {self.config.model_path}")
         if not self.config.binary_path.exists():
             raise SttNotConfiguredError(f"whisper.cpp 실행 파일을 찾지 못했습니다: {self.config.binary_path}")
+        try:
+            recording = inspect_wav(wav_path)
+            if recording.duration_sec < 0.5:
+                raise SttError("STT 전에 녹음 검증 실패: 녹음 길이가 0.5초보다 짧습니다.")
+            if recording.average_amplitude < MIN_AVERAGE_AMPLITUDE:
+                raise SttError(
+                    "STT 전에 녹음 검증 실패: 녹음 소리가 너무 작습니다. "
+                    "마이크 입력을 확인하고 조금 더 크게 말해주세요."
+                )
+        except Exception as exc:
+            if isinstance(exc, SttError):
+                raise
+            raise SttError(f"STT 전에 WAV 파일을 읽지 못했습니다: {exc}") from exc
         self._log(
             "stt.files found "
             f"binary={self.config.binary_path} binary_size={self.config.binary_path.stat().st_size} "
             f"model={self.config.model_path} model_size={self.config.model_path.stat().st_size} "
-            f"wav_size={wav_path.stat().st_size}"
+            f"wav_size={wav_path.stat().st_size} "
+            f"wav_duration={recording.duration_sec:.2f} wav_amplitude={recording.average_amplitude:.4f}"
         )
         try:
             mode = self.config.binary_path.stat().st_mode
@@ -198,3 +227,19 @@ def run_whisper_command(command: list[str], timeout_sec: int) -> str:
 
 def _run_command(command: list[str], timeout_sec: int) -> str:
     return run_whisper_command(command, timeout_sec)
+
+
+def find_default_whisper_binary(root: Path = PROJECT_ROOT) -> Path | None:
+    return _first_existing(root, DEFAULT_WHISPER_BIN_PATTERNS)
+
+
+def find_default_whisper_model(root: Path = PROJECT_ROOT) -> Path | None:
+    return _first_existing(root, DEFAULT_WHISPER_MODEL_PATTERNS)
+
+
+def _first_existing(root: Path, patterns: tuple[str, ...]) -> Path | None:
+    for pattern in patterns:
+        matches = sorted(path for path in root.glob(pattern) if path.is_file())
+        if matches:
+            return matches[0]
+    return None

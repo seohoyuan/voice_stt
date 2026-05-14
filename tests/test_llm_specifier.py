@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from voice2spec.desktop_pipeline import generate_spec_from_text
-from voice2spec.llm_specifier import ApiSpecProvider, ApiSpecifier
+from voice2spec.llm_specifier import AnthropicSpecProvider, ApiSpecProvider, ApiSpecifier
 from voice2spec.models import RefinedIdea
 
 
@@ -50,6 +50,11 @@ class FakeProvider(ApiSpecProvider):
 
 
 class LlmSpecifierTests(unittest.TestCase):
+    def test_anthropic_default_model_is_opus_46(self) -> None:
+        provider = AnthropicSpecProvider(api_key="fake-key")
+
+        self.assertEqual(provider.model, "claude-opus-4-6")
+
     def test_api_specifier_parses_provider_json(self) -> None:
         specifier = ApiSpecifier(FakeProvider())
         spec = specifier.specify(

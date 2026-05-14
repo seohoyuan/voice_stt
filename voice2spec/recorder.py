@@ -9,6 +9,9 @@ from pathlib import Path
 from uuid import uuid4
 
 
+MIN_AVERAGE_AMPLITUDE = 0.001
+
+
 class RecordingDependencyError(RuntimeError):
     pass
 
@@ -48,17 +51,23 @@ def record_wav(config: RecordingConfig) -> RecordingResult:
         import sounddevice as sd
     except ImportError as exc:
         raise RecordingDependencyError(
-            "마이크 녹음을 하려면 sounddevice가 필요합니다. "
-            "설치: python -m pip install sounddevice"
+            "마이크 녹음을 하려면 sounddevice와 numpy가 필요합니다. "
+            "설치: python -m pip install -r requirements.txt"
         ) from exc
 
-    audio = sd.rec(
-        frame_count,
-        samplerate=config.sample_rate,
-        channels=config.channels,
-        dtype="int16",
-    )
-    sd.wait()
+    try:
+        audio = sd.rec(
+            frame_count,
+            samplerate=config.sample_rate,
+            channels=config.channels,
+            dtype="int16",
+        )
+        sd.wait()
+    except ImportError as exc:
+        raise RecordingDependencyError(
+            "녹음 버퍼를 만들려면 numpy가 필요합니다. "
+            "설치: python -m pip install -r requirements.txt"
+        ) from exc
 
     _write_wav(
         path=wav_path,
@@ -97,6 +106,10 @@ def validate_recording(result: RecordingResult) -> None:
         raise RecordingValidationError("녹음 파일이 비어 있습니다.")
     if result.duration_sec < 0.5:
         raise RecordingValidationError("녹음 길이가 0.5초보다 짧습니다.")
+    if result.average_amplitude < MIN_AVERAGE_AMPLITUDE:
+        raise RecordingValidationError(
+            "녹음 소리가 너무 작습니다. 마이크 입력을 확인하고 조금 더 크게 말해주세요."
+        )
     if result.sample_rate != 16_000:
         raise RecordingValidationError("녹음 샘플레이트는 16kHz여야 합니다.")
     if result.channels != 1:

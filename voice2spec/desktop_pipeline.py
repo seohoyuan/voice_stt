@@ -94,6 +94,20 @@ def generate_spec_from_text(
     logger: PipelineLogger | None = None,
 ) -> tuple[TranscriptResult, RefinedIdea, SpecDocument, ValidationResult, Path, Path]:
     transcript = TranscriptResult(text=text, language="ko", confidence=1.0)
+    return generate_spec_from_transcript(
+        transcript=transcript,
+        ideas_dir=ideas_dir,
+        spec_provider=spec_provider,
+        logger=logger,
+    )
+
+
+def generate_spec_from_transcript(
+    transcript: TranscriptResult,
+    ideas_dir: Path,
+    spec_provider: str = "rule",
+    logger: PipelineLogger | None = None,
+) -> tuple[TranscriptResult, RefinedIdea, SpecDocument, ValidationResult, Path, Path]:
     idea = RuleBasedRefiner().refine(transcript)
     _log(logger, f"refine.done core_chars={len(idea.core)}")
     spec = _specifier_for(spec_provider).specify(idea)

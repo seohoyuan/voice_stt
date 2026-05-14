@@ -13,7 +13,7 @@ requirements = python3,kivy,pyjnius
 orientation = portrait
 fullscreen = 0
 
-android.permissions = RECORD_AUDIO
+android.permissions = RECORD_AUDIO,INTERNET
 android.api = 35
 android.minapi = 29
 android.archs = arm64-v8a

@@ -53,7 +53,7 @@ class OpenAiSpecProvider(ApiSpecProvider):
 class AnthropicSpecProvider(ApiSpecProvider):
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        self.model = model or os.environ.get("ANTHROPIC_MODEL", "claude-3-5-haiku-latest")
+        self.model = model or os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-6")
         if not self.api_key:
             raise LlmSpecError("ANTHROPIC_API_KEY가 설정되지 않았습니다.")
 

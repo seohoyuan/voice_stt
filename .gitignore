@@ -9,5 +9,6 @@ bin/*.apk
 bin/*.aab
 bin/whisper-cli
 bin/whisper-cli.exe
+bin/whisper-bin-*/
 models/*.bin
 external/

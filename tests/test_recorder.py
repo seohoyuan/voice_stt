@@ -31,17 +31,27 @@ class RecorderTests(unittest.TestCase):
             with self.assertRaises(RecordingValidationError):
                 validate_recording(result)
 
+    def test_reject_quiet_recording(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            wav_path = Path(temp_dir) / "quiet.wav"
+            _write_test_wav(wav_path, duration_sec=1.0, amplitude=1)
+
+            result = inspect_wav(wav_path)
+
+            with self.assertRaises(RecordingValidationError):
+                validate_recording(result)
+
     def test_reject_invalid_config(self) -> None:
         with self.assertRaises(ValueError):
             record_wav(RecordingConfig(duration_sec=0.1))
 
 
-def _write_test_wav(path: Path, duration_sec: float) -> None:
+def _write_test_wav(path: Path, duration_sec: float, amplitude: int = 1200) -> None:
     sample_rate = 16_000
     frames = int(sample_rate * duration_sec)
     samples = []
     for index in range(frames):
-        value = 1200 if index % 2 == 0 else -1200
+        value = amplitude if index % 2 == 0 else -amplitude
         samples.append(int(value).to_bytes(2, byteorder="little", signed=True))
 
     with wave.open(str(path), "wb") as wav:
