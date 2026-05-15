@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -20,7 +22,7 @@ from voice2spec.env import load_env_file
 from voice2spec.llm_specifier import LlmSpecError
 from voice2spec.recorder import inspect_wav
 from voice2spec.storage import find_idea, list_ideas, soft_delete_idea, update_idea
-from voice2spec.stt import SttConfig, SttError, SttNotConfiguredError, WhisperCppTranscriber, run_whisper_command
+from voice2spec.stt import SttConfig, SttError, SttNotConfiguredError, WhisperCppTranscriber, redact_command
 
 
 try:
@@ -42,7 +44,7 @@ except ImportError as exc:
 
 
 FONT_NAME = "Roboto"
-APP_BUILD_LABEL = "mobile-crud-claude-v3"
+APP_BUILD_LABEL = "mobile-crud-claude-v4"
 DEFAULT_PROVIDER = "claude"
 DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6"
 
@@ -480,13 +482,26 @@ class Voice2SpecApp(App):
         path = self._recordings_dir() / f"{datetime.now():%Y-%m-%d_%H%M%S}_{uuid4()}.wav"
         self._log_event(f"ui.start_recording target={path}")
         try:
-            if not has_record_audio_permission():
+            self._log_event("record.permission check started")
+            permission_granted = has_record_audio_permission()
+            self._log_event(f"record.permission check completed granted={permission_granted}")
+            if not permission_granted:
+                self._log_event("record.permission request started")
                 request_record_audio_permission()
+                self._log_event("record.permission request dispatched")
                 raise AndroidRecorderError("마이크 권한이 아직 허용되지 않았습니다.")
+            self._log_event("record.recorder.start calling")
             self.recorder.start(path)
+            self._log_event("record.recorder.start returned")
         except AndroidRecorderError as exc:
+            self._log_event(f"ui.start_recording failed: {type(exc).__name__}: {exc}")
             self._set_result(f"녹음 시작 실패\n\n{exc}\n\n{self._export_log_for_user()}")
             self._notify_user("녹음 시작 실패", str(exc))
+            return
+        except Exception as exc:
+            self._log_event(f"ui.start_recording unexpected: {type(exc).__name__}: {exc}")
+            self._set_result(f"녹음 시작 중 예상 못한 오류\n\n{type(exc).__name__}: {exc}\n\n{self._export_log_for_user()}")
+            self._notify_user("녹음 시작 오류", f"{type(exc).__name__}: {exc}")
             return
 
         self.latest_recording = path
@@ -498,18 +513,30 @@ class Voice2SpecApp(App):
         self._set_result(f"녹음 중...\n\n예상 저장 위치:\n{path}")
 
     def stop_recording(self) -> None:
+        self._log_event("ui.stop_recording tapped")
         try:
             path = self.recorder.stop()
         except AndroidRecorderError as exc:
+            self._log_event(f"ui.stop_recording failed: {type(exc).__name__}: {exc}")
             self._set_record_buttons(False)
             self._set_result(f"녹음 종료 실패\n\n{exc}\n\n{self._export_log_for_user()}")
             self._notify_user("녹음 종료 실패", str(exc))
             return
+        except Exception as exc:
+            self._log_event(f"ui.stop_recording unexpected: {type(exc).__name__}: {exc}")
+            self._set_record_buttons(False)
+            self._set_result(f"녹음 종료 중 예상 못한 오류\n\n{type(exc).__name__}: {exc}\n\n{self._export_log_for_user()}")
+            self._notify_user("녹음 종료 오류", f"{type(exc).__name__}: {exc}")
+            return
 
+        self._log_event(f"ui.stop_recording completed path={path}")
         self._set_record_buttons(False)
         self.latest_recording = path
+        self._log_event(f"record.export started path={path}")
         public_location = self._export_recording_for_user(path)
+        self._log_event(f"record.export result={public_location}")
         recording_ok, recording_info = self._describe_recording(path)
+        self._log_event(f"record.inspect ok={recording_ok} info={recording_info.replace(chr(10), ' | ')}")
         self._set_result(
             f"{recording_info}\n\n{public_location}\n\nSTT와 명세 생성을 시작합니다."
         )
@@ -528,14 +555,18 @@ class Voice2SpecApp(App):
         self._log_event(f"pipeline.wav started wav={wav_path}")
         self._schedule_ui("STT 처리 중", f"WAV:\n{wav_path}\n\nwhisper.cpp로 텍스트 변환 중입니다.")
         try:
+            self._log_event("pipeline.wav stt config building")
+            stt_config = self._stt_config()
+            self._log_stt_config(stt_config, wav_path)
             transcript = WhisperCppTranscriber(
-                self._stt_config(),
+                stt_config,
                 runner=self._run_stt_command,
                 event_logger=self._log_event,
             ).transcribe(wav_path)
             self._log_event(f"pipeline.wav stt done chars={len(transcript.text)}")
             self._apply_settings_to_env()
             provider = self.settings.get("provider", DEFAULT_PROVIDER)
+            self._log_event(f"pipeline.wav spec provider={provider}")
             self._schedule_ui("Claude 명세 생성 중", f"STT 결과:\n{transcript.text}\n\nprovider={provider}")
             _transcript, _idea, spec, validation, markdown_path, json_path = generate_spec_from_transcript(
                 transcript=transcript,
@@ -696,9 +727,74 @@ class Voice2SpecApp(App):
             threads=4,
         )
 
+    def _log_stt_config(self, config: SttConfig, wav_path: Path) -> None:
+        binary = config.binary_path
+        model = config.model_path
+        try:
+            recording = inspect_wav(wav_path)
+            wav_info = (
+                f"wav_exists={wav_path.exists()} wav_size={wav_path.stat().st_size if wav_path.exists() else None} "
+                f"wav_duration={recording.duration_sec:.2f} "
+                f"wav_avg={recording.average_amplitude:.6f} wav_peak={recording.peak_amplitude:.6f}"
+            )
+        except Exception as exc:
+            wav_info = f"wav_inspect_error={type(exc).__name__}: {exc}"
+        self._log_event(
+            "stt.config "
+            f"binary={binary} binary_exists={binary.exists() if binary else None} "
+            f"binary_size={binary.stat().st_size if binary and binary.exists() else None} "
+            f"model={model} model_exists={model.exists() if model else None} "
+            f"model_size={model.stat().st_size if model and model.exists() else None} "
+            f"language={config.language} threads={config.threads} timeout={config.timeout_sec} "
+            f"{wav_info}"
+        )
+
     def _run_stt_command(self, command: list[str], timeout_sec: int) -> str:
-        self._log_event(f"stt.subprocess starting timeout={timeout_sec}s")
-        return run_whisper_command(command, timeout_sec)
+        self._log_event(f"stt.subprocess starting timeout={timeout_sec}s command={redact_command(command)}")
+        self._schedule_ui("STT 실행 중", "whisper.cpp 프로세스를 시작했습니다. 모델 로딩 중일 수 있습니다.")
+        started_at = time.monotonic()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except Exception as exc:
+            self._log_event(f"stt.subprocess spawn failed: {type(exc).__name__}: {exc}")
+            raise SttError(f"STT 실행 파일을 시작하지 못했습니다: {exc}") from exc
+
+        next_heartbeat = 5
+        while True:
+            returncode = process.poll()
+            elapsed = time.monotonic() - started_at
+            if returncode is not None:
+                break
+            if elapsed >= timeout_sec:
+                self._log_event(f"stt.subprocess timeout elapsed={elapsed:.1f}s")
+                process.kill()
+                stdout, stderr = process.communicate()
+                raise SttError(f"STT 실행 시간이 {timeout_sec}초를 초과했습니다.\n{stdout}\n{stderr}")
+            if elapsed >= next_heartbeat:
+                self._log_event(f"stt.subprocess heartbeat elapsed={elapsed:.1f}s")
+                self._schedule_ui("STT 실행 중", f"whisper.cpp 처리 중입니다.\n경과: {elapsed:.0f}초")
+                next_heartbeat += 5
+            time.sleep(0.5)
+
+        stdout, stderr = process.communicate()
+        output = "\n".join(part for part in (stdout, stderr) if part)
+        elapsed = time.monotonic() - started_at
+        self._log_event(
+            f"stt.subprocess finished returncode={process.returncode} "
+            f"elapsed={elapsed:.1f}s stdout_chars={len(stdout or '')} stderr_chars={len(stderr or '')}"
+        )
+        if process.returncode != 0:
+            raise SttError(
+                f"STT 실행 실패(returncode={process.returncode}, elapsed={elapsed:.1f}s): {output.strip()}"
+            )
+        return output
 
     def _first_existing(self, *paths: Path) -> Path:
         for path in paths:

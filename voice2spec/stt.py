@@ -139,8 +139,19 @@ class WhisperCppTranscriber(Transcriber):
             raise SttNotConfiguredError(f"whisper.cpp 실행 파일을 찾지 못했습니다: {self.config.binary_path}")
         try:
             recording = inspect_wav(wav_path)
+            self._log(
+                "stt.wav inspected "
+                f"duration={recording.duration_sec:.2f} "
+                f"sample_rate={recording.sample_rate} channels={recording.channels} "
+                f"avg={recording.average_amplitude:.6f} peak={recording.peak_amplitude:.6f}"
+            )
             if recording.duration_sec < 0.5:
                 raise SttError("STT 전에 녹음 검증 실패: 녹음 길이가 0.5초보다 짧습니다.")
+            if recording.peak_amplitude == 0.0:
+                raise SttError(
+                    "STT 전에 녹음 검증 실패: 녹음 파일의 오디오 샘플이 모두 0입니다. "
+                    "마이크 입력 또는 Android 녹음 버퍼를 확인해야 합니다."
+                )
             if recording.average_amplitude < MIN_AVERAGE_AMPLITUDE:
                 raise SttError(
                     "STT 전에 녹음 검증 실패: 녹음 소리가 너무 작습니다. "
@@ -155,7 +166,8 @@ class WhisperCppTranscriber(Transcriber):
             f"binary={self.config.binary_path} binary_size={self.config.binary_path.stat().st_size} "
             f"model={self.config.model_path} model_size={self.config.model_path.stat().st_size} "
             f"wav_size={wav_path.stat().st_size} "
-            f"wav_duration={recording.duration_sec:.2f} wav_amplitude={recording.average_amplitude:.4f}"
+            f"wav_duration={recording.duration_sec:.2f} "
+            f"wav_amplitude={recording.average_amplitude:.6f} wav_peak={recording.peak_amplitude:.6f}"
         )
         try:
             mode = self.config.binary_path.stat().st_mode
